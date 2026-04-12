@@ -1,0 +1,7 @@
+#pragma once
+
+// Generate your own keys for IMG encryption
+// Each key is 16 bytes (128-bit)
+static const uint8_t HEADER_KEY[16] = {0};
+static const uint8_t VALIDATION_KEY[16] = {0};
+static const uint8_t DATA_KEY[16] = {0};

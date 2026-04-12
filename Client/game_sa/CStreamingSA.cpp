@@ -1,0 +1,946 @@
+/*****************************************************************************
+ *
+ *  PROJECT:     Multi Theft Auto v1.0
+ *  LICENSE:     See LICENSE in the top level directory
+ *  FILE:        game_sa/CStreamingSA.cpp
+ *  PURPOSE:     Data streamer
+ *
+ *  Multi Theft Auto is available from https://www.multitheftauto.com/
+ *
+ *****************************************************************************/
+
+#include "StdInc.h"
+#include <core/CCoreInterface.h>
+#include "CStreamingSA.h"
+#include "CModelInfoSA.h"
+#include "Fileapi.h"
+#include "processthreadsapi.h"
+#include "CGameSA.h"
+
+extern CCoreInterface* g_pCore;
+extern CGameSA*        pGame;
+
+// Dynamically resolved — FLA may relocate this array to heap and change the count.
+// We read the pointer from the game code operand at 0x5B8B08+6, which FLA patches.
+CStreamingInfo* CStreamingSA::ms_aInfoForModel = (CStreamingInfo*)*(void**)(0x5B8B08 + 6);
+uint32_t        CStreamingSA::ms_aInfoForModelCount = 0;
+HANDLE* phStreamingThread = (HANDLE*)0x8E4008;
+uint32(&CStreamingSA::ms_streamingHalfOfBufferSizeBlocks) = *(uint32*)0x8E4CA8;
+void* (&CStreamingSA::ms_pStreamingBuffer)[2] = *(void* (*)[2])0x8E4CAC;
+
+namespace
+{
+    bool DetectSSD()
+    {
+        wchar_t exePath[MAX_PATH];
+        if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH))
+            return false;
+
+        wchar_t volumePath[MAX_PATH];
+        if (!GetVolumePathNameW(exePath, volumePath, MAX_PATH))
+            return false;
+
+        wchar_t devicePath[] = L"\\\\.\\X:";
+        devicePath[4] = volumePath[0];
+
+        HANDLE hDevice = CreateFileW(devicePath, 0, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                     nullptr, OPEN_EXISTING, 0, nullptr);
+        if (hDevice == INVALID_HANDLE_VALUE)
+            return false;
+
+        struct { DWORD PropertyId; DWORD QueryType; BYTE AdditionalParameters[1]; } query = {};
+        query.PropertyId = 7;  // StorageDeviceSeekPenaltyProperty
+        query.QueryType = 0;   // PropertyStandardQuery
+
+        struct { DWORD Version; DWORD Size; BOOLEAN IncursSeekPenalty; } result = {};
+        DWORD bytesReturned = 0;
+
+        BOOL ok = DeviceIoControl(hDevice, 0x002D1400,  // IOCTL_STORAGE_QUERY_PROPERTY
+                                  &query, sizeof(query), &result, sizeof(result),
+                                  &bytesReturned, nullptr);
+        CloseHandle(hDevice);
+
+        if (ok && bytesReturned >= sizeof(result))
+            return !result.IncursSeekPenalty;
+
+        return false;
+    }
+
+    // Validates model info pointer by checking VFTBL is in valid GTA:SA code range.
+    // Uses SEH for crash protection when reading the VFTBL field, but avoids
+    // the expensive volatile read of VFTBL->Destructor by using address validation.
+    bool IsValidPtr(const void* ptr) noexcept
+    {
+        if (!ptr)
+            return false;
+
+        __try
+        {
+            const auto* p = static_cast<const CBaseModelInfoSAInterface*>(ptr);
+            const DWORD vftbl = reinterpret_cast<DWORD>(p->VFTBL);
+            // VFTBL must be in valid GTA:SA code range - this implicitly validates
+            // the pointer since garbage/freed memory won't have valid VFTBL addresses
+            return SharedUtil::IsValidGtaSaPtr(vftbl);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return false;
+        }
+    }
+
+    // Reusable event handle pool for async CreateFile operations
+    namespace StreamingEventPool
+    {
+        constexpr auto             SIZE = 8u;
+        static std::atomic<HANDLE> slots[SIZE] = {};
+
+        inline HANDLE Acquire()
+        {
+            for (auto& slot : slots)
+            {
+                if (auto h = slot.exchange(nullptr))
+                {
+                    ResetEvent(h);
+                    return h;
+                }
+            }
+            return CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        }
+
+        inline void Release(HANDLE h)
+        {
+            if (!h)
+                return;
+
+            for (auto& slot : slots)
+            {
+                HANDLE expected = nullptr;
+                if (slot.compare_exchange_strong(expected, h))
+                    return;
+            }
+            CloseHandle(h);
+        }
+    }
+
+    namespace AsyncStreamingFile
+    {
+        enum class State : int
+        {
+            Running = 0,
+            Completed = 1,
+            Abandoned = 2
+        };
+        constexpr DWORD TIMEOUT_MS = 5'000;
+
+        struct Params
+        {
+            std::wstring     fileName;
+            DWORD            access = 0;
+            DWORD            shareMode = 0;
+            DWORD            disposition = 0;
+            DWORD            flags = 0;
+            HANDLE           result = INVALID_HANDLE_VALUE;
+            DWORD            error = ERROR_SUCCESS;
+            HANDLE           event = nullptr;
+            std::atomic<int> state{0};
+        };
+
+        constexpr auto              POOL_SIZE = 8u;
+        static std::atomic<Params*> pool[POOL_SIZE] = {};
+
+        inline Params* Acquire()
+        {
+            for (auto& slot : pool)
+            {
+                if (auto* p = slot.exchange(nullptr))
+                {
+                    p->state = 0;
+                    p->result = INVALID_HANDLE_VALUE;
+                    p->error = ERROR_SUCCESS;
+                    p->event = nullptr;
+                    p->fileName.clear();
+                    return p;
+                }
+            }
+            return new (std::nothrow) Params();
+        }
+
+        inline void Release(Params* p)
+        {
+            if (!p)
+                return;
+
+            p->fileName.clear();
+
+            for (auto& slot : pool)
+            {
+                Params* expected = nullptr;
+                if (slot.compare_exchange_strong(expected, p))
+                    return;
+            }
+            delete p;
+        }
+
+        static DWORD WINAPI PoolCallback(LPVOID arg)
+        {
+            auto* p = static_cast<Params*>(arg);
+
+            p->result = CreateFileW(p->fileName.c_str(), p->access, p->shareMode, nullptr, p->disposition, p->flags, nullptr);
+            p->error = GetLastError();
+
+            auto expected = static_cast<int>(State::Running);
+            if (p->state.compare_exchange_strong(expected, static_cast<int>(State::Completed)))
+            {
+                SetEvent(p->event);
+            }
+            else
+            {
+                StreamingEventPool::Release(p->event);
+                if (p->result != INVALID_HANDLE_VALUE)
+                    CloseHandle(p->result);
+                Release(p);
+            }
+            return 0;
+        }
+
+        inline HANDLE DirectCall(LPCWSTR name, DWORD access, DWORD share, DWORD disp, DWORD flags)
+        {
+            return CreateFileW(name, access, share, nullptr, disp, flags, nullptr);
+        }
+    }
+
+    static HANDLE CreateFileWithTimeoutForStreaming(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, DWORD dwCreationDisposition,
+                                                    DWORD dwFlagsAndAttributes)
+    {
+        using namespace AsyncStreamingFile;
+
+        if (!lpFileName)
+        {
+            SetLastError(ERROR_INVALID_PARAMETER);
+            return INVALID_HANDLE_VALUE;
+        }
+
+        auto* params = Acquire();
+        if (!params)
+        {
+            AddReportLog(6216, "Streaming CreateFile timeout: alloc failed");
+            return DirectCall(lpFileName, dwDesiredAccess, dwShareMode, dwCreationDisposition, dwFlagsAndAttributes);
+        }
+
+        try
+        {
+            params->fileName = lpFileName;
+        }
+        catch (...)
+        {
+            AddReportLog(6221, "Streaming CreateFile timeout: string copy failed");
+            Release(params);
+            return DirectCall(lpFileName, dwDesiredAccess, dwShareMode, dwCreationDisposition, dwFlagsAndAttributes);
+        }
+
+        auto event = StreamingEventPool::Acquire();
+        if (!event)
+        {
+            AddReportLog(6217, "Streaming CreateFile timeout: event failed");
+            Release(params);
+            return DirectCall(lpFileName, dwDesiredAccess, dwShareMode, dwCreationDisposition, dwFlagsAndAttributes);
+        }
+
+        params->access = dwDesiredAccess;
+        params->shareMode = dwShareMode;
+        params->disposition = dwCreationDisposition;
+        params->flags = dwFlagsAndAttributes;
+        params->event = event;
+
+        if (!QueueUserWorkItem(PoolCallback, params, WT_EXECUTELONGFUNCTION))
+        {
+            AddReportLog(6219, "Streaming CreateFile timeout: queue failed");
+            StreamingEventPool::Release(event);
+            Release(params);
+            return DirectCall(lpFileName, dwDesiredAccess, dwShareMode, dwCreationDisposition, dwFlagsAndAttributes);
+        }
+
+        if (WaitForSingleObject(event, TIMEOUT_MS) == WAIT_OBJECT_0)
+        {
+            StreamingEventPool::Release(event);
+            auto hResult = params->result;
+            auto dwError = params->error;
+            Release(params);
+            SetLastError(dwError);
+            return hResult;
+        }
+
+        AddReportLog(6213, SString("Streaming CreateFile timed out after %ums: %s", TIMEOUT_MS, SharedUtil::ToUTF8(lpFileName).c_str()));
+
+        auto expected = static_cast<int>(State::Running);
+        if (params->state.compare_exchange_strong(expected, static_cast<int>(State::Abandoned)))
+        {
+            SetLastError(ERROR_TIMEOUT);
+        }
+        else
+        {
+            StreamingEventPool::Release(event);
+            auto actualError = (params->result == INVALID_HANDLE_VALUE) ? params->error : ERROR_TIMEOUT;
+            if (params->result != INVALID_HANDLE_VALUE)
+                CloseHandle(params->result);
+            Release(params);
+            SetLastError(actualError);
+        }
+        return INVALID_HANDLE_VALUE;
+    }
+
+    //
+    // Used in LoadAllRequestedModels to record state
+    //
+    struct SPassStats
+    {
+        bool  bLoadingBigModel;
+        DWORD numPriorityRequests;
+        DWORD numModelsRequested;
+        DWORD memoryUsed;
+
+        void Record()
+        {
+#define VAR_CStreaming_bLoadingBigModel    0x08E4A58
+#define VAR_CStreaming_numPriorityRequests 0x08E4BA0
+#define VAR_CStreaming_numModelsRequested  0x08E4CB8
+#define VAR_CStreaming_memoryUsed          0x08E4CB4
+
+            bLoadingBigModel = *(BYTE*)VAR_CStreaming_bLoadingBigModel != 0;
+            numPriorityRequests = *(DWORD*)VAR_CStreaming_numPriorityRequests;
+            numModelsRequested = *(DWORD*)VAR_CStreaming_numModelsRequested;
+            memoryUsed = *(DWORD*)VAR_CStreaming_memoryUsed;
+        }
+    };
+
+    constexpr size_t RESERVED_STREAMS_NUM = 10;  // GTA3 + 9 SFX archives(FEET, GENRL, PAIN_A, SCRIPT, SPC_EA, SPC_FA, SPC_GA, SPC_NA, SPC_PA)
+    constexpr size_t MAX_STREAMS_NUM = 255;
+    constexpr size_t MAX_IMAGES_NUM = MAX_STREAMS_NUM - RESERVED_STREAMS_NUM;
+    constexpr size_t MIN_IMAGES_NUM = 6;  // GTA3(yes, it is presented twice), GTA_INT, CARREC, SCRIPT, CUTSCENE, PLAYER
+}  // namespace
+
+bool IsUpgradeModelId(DWORD dwModelID)
+{
+    return dwModelID >= 1000 && dwModelID <= 1193;
+}
+
+CStreamingSA::CStreamingSA()
+{
+    ms_aInfoForModel = (CStreamingInfo*)*(void**)(0x5B8B08 + 6);
+    if (pGame)
+    {
+        const auto cnt = pGame->GetCountOfAllFileIDs();
+        ms_aInfoForModelCount = (cnt > 0) ? static_cast<uint32_t>(cnt) : GetModelInfoMax();
+    }
+    else
+    {
+        ms_aInfoForModelCount = GetModelInfoMax();
+    }
+    if (ms_aInfoForModelCount == 0)
+        ms_aInfoForModelCount = MODELINFO_MAX;
+
+    // Save pointers to the current (possibly FLA-relocated) stream handle/name arrays
+    // BEFORE SetArchivesNum overwrites the operands to point to MTA's own arrays.
+    // FLA patches operand at 0x4066D6 (streamHandles) and 0x4066C7+3 (streamNames).
+    // Read from a known patched operand to get the actual current pointer.
+    HANDLE*     pCurrentHandles = *(HANDLE**)(0x406737);        // _sub_406710: streamHandles ptr
+    SStreamName* pCurrentNames  = *(SStreamName**)(0x40676C);   // _sub_406750: streamNames ptr
+    CArchiveInfo* pCurrentImgs  = (CArchiveInfo*)0x8E48D8;      // Archive info is not relocated by FLA
+
+    // Allocate the default number of archives in order to keep modded games working as before.
+    SetArchivesNum(VAR_DefaultMaxArchives);
+
+    // Copy the default data from the actual (possibly FLA-relocated) arrays
+    std::memcpy(m_StreamHandles.data(), pCurrentHandles, sizeof(HANDLE) * std::min(m_StreamHandles.size(), (size_t)VAR_DefaultStreamHandlersMaxCount));
+    std::memcpy(m_StreamNames.data(), pCurrentNames, sizeof(SStreamName) * std::min(m_StreamNames.size(), (size_t)VAR_DefaultStreamHandlersMaxCount));
+    std::memcpy(m_Imgs.data(), pCurrentImgs, sizeof(CArchiveInfo) * std::min(m_Imgs.size(), (size_t)VAR_DefaultMaxArchives));
+
+    // Extend dummy↔real object conversion distance (stock 80.0f at 0x858A14, shared — redirect operand)
+    {
+        static float s_fDummyConvertDist = 180.0f;
+        const DWORD  addr = reinterpret_cast<DWORD>(&s_fDummyConvertDist);
+        MemPut<DWORD>(0x616078, addr);  // ManageDummy
+        MemPut<DWORD>(0x615FB8, addr);  // ManageObject
+        MemPut<DWORD>(0x610EEC, addr);  // FindDummyDistForModel
+    }
+
+    // On SSD drives, remove FILE_FLAG_NO_BUFFERING from CdStreamInit so the OS can
+    // cache and read-ahead IMG sectors. This runs before CdStreamInit executes.
+    // At 0x406BC8: "mov eax, 20000000h" (5 bytes) sets NO_BUFFERING flag.
+    // NOP it so streamCreateFlags = FILE_FLAG_OVERLAPPED only.
+    if (DetectSSD())
+    {
+        MemSet((void*)0x406BC8, 0x90, 5);
+    }
+}
+
+void CStreamingSA::SetArchivesNum(size_t imagesNum)
+{
+    if (imagesNum < MIN_IMAGES_NUM || imagesNum > MAX_IMAGES_NUM)
+        return;
+
+    /*
+        IMGs
+    */
+    if (m_Imgs.size() != imagesNum)
+    {
+        try
+        {
+            m_Imgs.resize(imagesNum);
+        }
+        catch (const std::bad_alloc&)
+        {
+            return;
+        }
+
+        const auto   pImgs = m_Imgs.data();
+        const size_t uiImgsSize = sizeof(CArchiveInfo) * m_Imgs.size();
+
+        // CStreaming::AddImageToList
+        MemPutFast<DWORD>((void*)0x1567B94, (DWORD)pImgs);
+        MemPutFast<DWORD>((void*)0x1567BA2, (DWORD)pImgs + uiImgsSize);
+        MemPutFast<DWORD>((void*)0x1567BBA, (DWORD)pImgs);
+        MemPutFast<DWORD>((void*)0x1567BD6, (DWORD)pImgs + 0x2C);
+        MemPutFast<DWORD>((void*)0x1567BE3, (DWORD)pImgs + 0x28);
+
+        // CStreaming::InitImageList
+        MemPut<DWORD>((void*)0x4083C1, (DWORD)pImgs + 0x2C);
+        MemPut<DWORD>((void*)0x4083DE, (DWORD)pImgs + 0x2C + uiImgsSize);
+        MemPut<DWORD>((void*)0x4083E9, (DWORD)pImgs);
+        MemPut<DWORD>((void*)0x4083FA, (DWORD)pImgs + uiImgsSize);
+        MemPut<DWORD>((void*)0x40840B, (DWORD)pImgs);
+        MemPut<DWORD>((void*)0x40841A, (DWORD)pImgs + uiImgsSize);
+        MemPut<DWORD>((void*)0x40843B, (DWORD)pImgs);
+        MemPut<DWORD>((void*)0x40845B, (DWORD)pImgs + 0x2C);
+        MemPut<DWORD>((void*)0x408461, (DWORD)pImgs + 0x28);
+        MemPut<DWORD>((void*)0x408479, (DWORD)pImgs);
+        MemPut<DWORD>((void*)0x4084A2, (DWORD)pImgs + 0x2C);
+        MemPut<DWORD>((void*)0x4084A8, (DWORD)pImgs + 0x28);
+
+        // CStreaming::loadArchives
+        MemPut<DWORD>((void*)0x5B82F1, (DWORD)pImgs);
+        MemPut<DWORD>((void*)0x5B82FD, (DWORD)pImgs);
+        MemPut<DWORD>((void*)0x5B8303, (DWORD)pImgs + uiImgsSize);
+
+        // CStreamingInfo::GetCdPosn
+        MemPut<DWORD>((void*)0x40757F, (DWORD)pImgs + 0x2C);
+
+        // CStreaming::GetNextFileOnCd
+        MemPut<DWORD>((void*)0x408FDC, (DWORD)pImgs + 0x2C);
+
+        // CStreaming::requestSpecialModel
+        MemPut<DWORD>((void*)0x409D5A, (DWORD)pImgs + 0x2C);
+
+        // CStreaming::RequestModelStream
+        MemPut<DWORD>((void*)0x40CC54, (DWORD)pImgs + 0x2C);
+        MemPut<DWORD>((void*)0x40CCC7, (DWORD)pImgs + 0x2C);
+
+        // CStreamingInfo::GetCdPosnAndSize
+        MemPutFast<DWORD>((void*)0x1560E68, (DWORD)pImgs + 0x2C);
+
+        // sub_40A080
+        MemPutFast<DWORD>((void*)0x15663E7, (DWORD)pImgs + 0x2C);
+    }
+
+    /*
+        Stream handles
+    */
+    const size_t handlesNum = Clamp((size_t)VAR_DefaultStreamHandlersMaxCount, imagesNum + RESERVED_STREAMS_NUM, MAX_STREAMS_NUM);
+    if (m_StreamHandles.size() != handlesNum)
+    {
+        try
+        {
+            m_StreamHandles.resize(handlesNum);
+            m_StreamNames.resize(handlesNum);
+        }
+        catch (const std::bad_alloc&)
+        {
+            return;
+        }
+
+        const auto pStreamHandles = m_StreamHandles.data();
+        const auto pStreamNames = m_StreamNames.data();
+
+        // _GetFileSizeOfTheFirstStream
+        MemPutFast<DWORD>((void*)0x15700D1, (DWORD)pStreamHandles);
+
+        // _closeAllStreams
+        MemPut<DWORD>((void*)0x4066C7, (DWORD)pStreamNames);
+        MemPut<DWORD>((void*)0x4066D6, (DWORD)pStreamHandles);
+        MemPut<DWORD>((void*)0x4066ED, (DWORD)pStreamHandles);
+
+        // _sub_406710
+        MemPut<DWORD>((void*)0x406737, (DWORD)pStreamHandles);
+
+        // _sub_406750
+        MemPut<DWORD>((void*)0x40676C, (DWORD)pStreamNames);
+        MemPut<DWORD>((void*)0x406797, (DWORD)pStreamHandles);
+
+        // _openStream
+        DWORD dwExeCodePtr = (DWORD)0x01564A94;
+
+        MemPutFast<WORD>((void*)(dwExeCodePtr), (WORD)0x048B);  // mov     eax, _streamHandles[esi*4]
+        MemPutFast<BYTE>((void*)(dwExeCodePtr + 2), (BYTE)0xB5);
+        MemPutFast<DWORD>((void*)(dwExeCodePtr + 3), (DWORD)pStreamHandles);
+
+        MemPutFast<WORD>((void*)(dwExeCodePtr + 7), (WORD)0xC085);
+
+        MemPutFast<WORD>((void*)(dwExeCodePtr + 9), (WORD)0x840F);
+        MemPutFast<DWORD>((void*)(dwExeCodePtr + 11), (DWORD)(0x01564B31 - (dwExeCodePtr + 15)));
+
+        MemPutFast<BYTE>((void*)(dwExeCodePtr + 15), (BYTE)0x46);
+        MemPutFast<WORD>((void*)(dwExeCodePtr + 16), (WORD)0xFE81);
+        MemPutFast<DWORD>((void*)(dwExeCodePtr + 18), (DWORD)(handlesNum - 1));  // MAX_NUMBER_OF_STREAM_HANDLES
+
+        MemPutFast<BYTE>((void*)(dwExeCodePtr + 22), (BYTE)0x7C);
+        MemPutFast<BYTE>((void*)(dwExeCodePtr + 23), (BYTE)(dwExeCodePtr - (dwExeCodePtr + 24)));
+
+        MemPutFast<BYTE>((void*)(dwExeCodePtr + 24), (BYTE)0xE9);
+        MemPutFast<DWORD>((void*)(dwExeCodePtr + 25), (DWORD)(0x01564B31 - (dwExeCodePtr + 29)));
+        // end of loop creation
+
+        MemPutFast<DWORD>((void*)0x1564B74, (DWORD)pStreamHandles);
+        MemPutFast<DWORD>((void*)0x1564B8C, (DWORD)pStreamNames);
+
+        // _sub_4068A0
+        MemPut<DWORD>((void*)0x4068AB, (DWORD)pStreamHandles);
+        MemPut<DWORD>((void*)0x4068C2, (DWORD)pStreamHandles);
+        MemPut<DWORD>((void*)0x4068D0, (DWORD)pStreamHandles);
+        MemPut<DWORD>((void*)0x4068DD, (DWORD)pStreamNames);
+
+        // _readStream
+        MemPutFast<DWORD>((void*)0x156C2E8, (DWORD)pStreamHandles);
+
+        // _initStreaming
+        MemPut<DWORD>((void*)0x406B7C, (DWORD)pStreamHandles);
+        MemPut<DWORD>((void*)0x406B81, (DWORD)pStreamNames);
+        MemPut<DWORD>((void*)0x406B98, (DWORD)(pStreamNames + sizeof(SStreamName) * (handlesNum - 1)));
+    }
+}
+
+void CStreamingSA::RequestModel(DWORD dwModelID, DWORD dwFlags)
+{
+    if (IsUpgradeModelId(dwModelID))
+    {
+        DWORD dwFunc = FUNC_RequestVehicleUpgrade;
+        // clang-format off
+        __asm
+        {
+            push    dwFlags
+            push    dwModelID
+            call    dwFunc
+            add     esp, 8
+        }
+        // clang-format on
+    }
+    else
+    {
+        CBaseModelInfoSAInterface** ppModelInfo = reinterpret_cast<CBaseModelInfoSAInterface**>(ARRAY_ModelInfo);
+        if (dwModelID < MODELINFO_DFF_MAX)
+        {
+            CBaseModelInfoSAInterface* pModelInfo = ppModelInfo[dwModelID];
+            if (!IsValidPtr(pModelInfo))
+            {
+                ppModelInfo[dwModelID] = nullptr;
+
+                CStreamingInfo* pStreamInfo = GetStreamingInfo(dwModelID);
+                if (pStreamInfo)
+                {
+                    pStreamInfo->prevId = static_cast<unsigned short>(-1);
+                    pStreamInfo->nextId = static_cast<unsigned short>(-1);
+                    pStreamInfo->nextInImg = static_cast<unsigned short>(-1);
+                    pStreamInfo->loadState = eModelLoadState::LOADSTATE_NOT_LOADED;
+                }
+
+                return;
+            }
+        }
+
+        DWORD dwFunction = FUNC_CStreaming__RequestModel;
+        // clang-format off
+        __asm
+        {
+            push    dwFlags
+            push    dwModelID
+            call    dwFunction
+            add     esp, 8
+        }
+        // clang-format on
+    }
+}
+
+void CStreamingSA::RemoveModel(std::uint32_t model)
+{
+    using Signature = void(__cdecl*)(std::uint32_t);
+    const auto function = reinterpret_cast<Signature>(0x4089A0);
+    function(model);
+}
+
+void CStreamingSA::LoadAllRequestedModels(bool bOnlyPriorityModels, const char* szTag)
+{
+    TIMEUS startTime = GetTimeUs();
+
+    DWORD dwFunction = FUNC_LoadAllRequestedModels;
+    DWORD dwOnlyPriorityModels = bOnlyPriorityModels;
+    // clang-format off
+    __asm
+    {
+        push    dwOnlyPriorityModels
+        call    dwFunction
+        add     esp, 4
+    }
+    // clang-format on
+
+    if (IS_TIMING_CHECKPOINTS())
+    {
+        uint deltaTimeMs = (GetTimeUs() - startTime) / 1000;
+        if (deltaTimeMs > 2)
+            TIMING_DETAIL(SString("LoadAllRequestedModels( %d, %s ) took %d ms", bOnlyPriorityModels, szTag, deltaTimeMs));
+    }
+}
+
+bool CStreamingSA::HasModelLoaded(DWORD dwModelID)
+{
+    if (IsUpgradeModelId(dwModelID))
+    {
+        bool  bReturn;
+        DWORD dwFunc = FUNC_CStreaming__HasVehicleUpgradeLoaded;
+        // clang-format off
+        __asm
+        {
+            push    dwModelID
+            call    dwFunc
+            add     esp, 0x4
+            mov     bReturn, al
+        }
+        // clang-format on
+        return bReturn;
+    }
+    else
+    {
+        DWORD dwFunc = FUNC_CStreaming__HasModelLoaded;
+        bool  bReturn = 0;
+        // clang-format off
+        __asm
+        {
+            push    dwModelID
+            call    dwFunc
+            mov     bReturn, al
+            pop     eax
+        }
+        // clang-format on
+
+        return bReturn;
+    }
+}
+
+void CStreamingSA::RequestSpecialModel(DWORD model, const char* szTexture, DWORD channel)
+{
+    DWORD dwFunc = FUNC_CStreaming_RequestSpecialModel;
+    // clang-format off
+    __asm
+    {
+        push    channel
+        push    szTexture
+        push    model
+        call    dwFunc
+        add     esp, 0xC
+    }
+    // clang-format on
+}
+
+void CStreamingSA::ReinitStreaming()
+{
+    typedef int(__cdecl * Function_ReInitStreaming)();
+    ((Function_ReInitStreaming)(0x40E560))();
+}
+
+// ReinitStreaming should be called after this.
+// Otherwise the model wont be restreamed
+// TODO: Somehow restream a single model instead of the whole world
+void CStreamingSA::BuildChainCache()
+{
+    if (m_bChainCacheBuilt)
+        return;
+    for (auto& m : m_ChainIndex)
+        m.clear();
+    for (uint32_t i = 0; i < ms_aInfoForModelCount; ++i)
+    {
+        const CStreamingInfo& info = ms_aInfoForModel[i];
+        if (info.sizeInBlocks == 0)
+            continue;
+        m_ChainIndex[info.archiveId].emplace(info.offsetInBlocks, i);
+    }
+    m_bChainCacheBuilt = true;
+}
+
+void CStreamingSA::DetachFromChain(uint32_t modelId)
+{
+    CStreamingInfo* pItem = GetStreamingInfo(modelId);
+    if (!pItem)
+        return;
+    auto& bucket = m_ChainIndex[pItem->archiveId];
+    auto it = bucket.find(pItem->offsetInBlocks);
+    if (it == bucket.end() || it->second != modelId)
+        return;
+
+    if (it != bucket.begin())
+    {
+        auto prev = std::prev(it);
+        CStreamingInfo* pPrev = GetStreamingInfo(prev->second);
+        if (pPrev && pPrev->nextInImg == modelId)
+            pPrev->nextInImg = pItem->nextInImg;
+    }
+
+    bucket.erase(it);
+}
+
+void CStreamingSA::InsertIntoChain(uint32_t modelId)
+{
+    CStreamingInfo* pItem = GetStreamingInfo(modelId);
+    if (!pItem || pItem->sizeInBlocks == 0)
+        return;
+    auto& bucket = m_ChainIndex[pItem->archiveId];
+    auto inserted = bucket.emplace(pItem->offsetInBlocks, modelId);
+    if (!inserted.second)
+        inserted.first->second = modelId;
+
+    auto it = inserted.first;
+    if (it != bucket.begin())
+    {
+        auto prev = std::prev(it);
+        CStreamingInfo* pPrev = GetStreamingInfo(prev->second);
+        if (pPrev)
+        {
+            pItem->nextInImg = pPrev->nextInImg;
+            pPrev->nextInImg = static_cast<uint16_t>(modelId);
+            return;
+        }
+    }
+
+    auto next = std::next(it);
+    pItem->nextInImg = (next != bucket.end()) ? static_cast<uint16_t>(next->second) : static_cast<uint16_t>(-1);
+}
+
+void CStreamingSA::SetStreamingInfo(uint modelid, unsigned char usStreamID, uint uiOffset, ushort usSize, uint uiNextInImg)
+{
+    CStreamingInfo* pItemInfo = GetStreamingInfo(modelid);
+    if (!pItemInfo)
+        return;
+
+    const auto baseTxdId = g_pCore->GetGame()->GetBaseIDforTXD();
+    if (modelid < static_cast<uint>(baseTxdId))
+    {
+        if (pItemInfo->loadState != eModelLoadState::LOADSTATE_NOT_LOADED)
+            RemoveModel(modelid);
+    }
+
+    BuildChainCache();
+    DetachFromChain(modelid);
+
+    pItemInfo->archiveId = usStreamID;
+    pItemInfo->offsetInBlocks = uiOffset;
+    pItemInfo->sizeInBlocks = usSize;
+    pItemInfo->nextInImg = static_cast<uint16_t>(uiNextInImg);
+
+    if (uiNextInImg == static_cast<uint>(-1))
+        InsertIntoChain(modelid);
+    else
+        m_ChainIndex[usStreamID][uiOffset] = modelid;
+
+    if (usSize > ms_streamingHalfOfBufferSizeBlocks)
+        SetStreamingBufferSize(static_cast<uint32>(usSize) * 2);
+}
+
+CStreamingInfo* CStreamingSA::GetStreamingInfo(uint modelid)
+{
+    const uint maxStreamingID = pGame->GetCountOfAllFileIDs();
+    if (modelid >= maxStreamingID)
+        return nullptr;
+
+    return &ms_aInfoForModel[modelid];
+}
+
+unsigned char CStreamingSA::GetUnusedArchive()
+{
+    // Get internal IMG id
+    // By default gta sa uses 6 of 8 IMG archives
+    for (size_t i = 6; i < m_Imgs.size(); i++)
+    {
+        if (!m_Imgs[i].uiStreamHandleId)
+            return (unsigned char)i;
+    }
+    return INVALID_ARCHIVE_ID;
+}
+
+unsigned char CStreamingSA::GetUnusedStreamHandle()
+{
+    for (size_t i = 0; i < m_StreamHandles.size(); i++)
+    {
+        if (!m_StreamHandles[i])
+            return (unsigned char)i;
+    }
+    return INVALID_STREAM_ID;
+}
+
+unsigned char CStreamingSA::AddArchive(const wchar_t* szFilePath)
+{
+    auto ucArchiveId = GetUnusedArchive();
+    if (ucArchiveId == INVALID_ARCHIVE_ID)
+    {
+        // Allocate some extra archives
+        AllocateArchive();
+
+        // Give it a second try
+        ucArchiveId = GetUnusedArchive();
+        if (ucArchiveId == INVALID_ARCHIVE_ID)
+            return INVALID_ARCHIVE_ID;
+    }
+
+    // Get free stream handler id
+    const auto ucStreamID = GetUnusedStreamHandle();
+    if (ucStreamID == INVALID_STREAM_ID)
+        return INVALID_ARCHIVE_ID;
+
+    DWORD streamCreateFlags = *(DWORD*)0x8E3FE0;
+    DWORD accessHint = FILE_FLAG_SEQUENTIAL_SCAN;
+    if (szFilePath)
+    {
+        const wchar_t* slash1 = wcsrchr(szFilePath, L'\\');
+        const wchar_t* slash2 = wcsrchr(szFilePath, L'/');
+        const wchar_t* base = slash1 ? slash1 + 1 : (slash2 ? slash2 + 1 : szFilePath);
+        if (_wcsnicmp(base, L"gta3", 4) == 0 || _wcsnicmp(base, L"gta_", 4) == 0 ||
+            _wcsnicmp(base, L"player", 6) == 0 || _wcsnicmp(base, L"vehicles", 8) == 0)
+            accessHint = FILE_FLAG_RANDOM_ACCESS;
+    }
+    HANDLE hFile = CreateFileWithTimeoutForStreaming(szFilePath, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING,
+                                                     streamCreateFlags | FILE_ATTRIBUTE_READONLY | accessHint);
+
+    if (hFile == INVALID_HANDLE_VALUE)
+        return INVALID_ARCHIVE_ID;
+
+    m_StreamHandles[ucStreamID] = hFile;
+    m_Imgs[ucArchiveId].uiStreamHandleId = (ucStreamID << 24);
+
+    return ucArchiveId;
+}
+
+void CStreamingSA::RemoveArchive(unsigned char ucArchiveID)
+{
+    unsigned int uiStreamHandlerID = m_Imgs[ucArchiveID].uiStreamHandleId >> 24;
+    if (!uiStreamHandlerID)
+        return;
+
+    m_Imgs[ucArchiveID].uiStreamHandleId = 0;
+
+    CloseHandle(m_StreamHandles[uiStreamHandlerID]);
+    m_StreamHandles[uiStreamHandlerID] = NULL;
+}
+
+bool CStreamingSA::SetStreamingBufferSize(uint32 numBlocks)
+{
+    // Round up to even number so it can be split in half properly
+    numBlocks += numBlocks % 2;
+
+    // Already the requested size
+    if (numBlocks == ms_streamingHalfOfBufferSizeBlocks * 2)
+        return true;
+
+    if (ms_pStreamingBuffer[0] == nullptr || ms_pStreamingBuffer[1] == nullptr)
+        return false;
+
+    if (!phStreamingThread || !*phStreamingThread || *phStreamingThread == INVALID_HANDLE_VALUE)
+        return false;
+
+    typedef void*(__cdecl * AllocFunc)(uint32, uint32);
+    typedef void(__cdecl * DeallocFunc)(void*);
+
+    void* pNewBuffer = ((AllocFunc)(0x72F4C0))(numBlocks * 2048, 2048);
+    if (!pNewBuffer)
+        return false;
+
+    int pointer = *(int*)0x8E3FFC;
+    SGtaStream(&streaming)[5] = *(SGtaStream(*)[5])(pointer);
+
+    void* const pOldBuffer = ms_pStreamingBuffer[0];
+
+    constexpr int kMaxRetries = 10000;
+    for (int attempt = 0;; ++attempt)
+    {
+        if (attempt >= kMaxRetries)
+        {
+            ((DeallocFunc)(0x72F4F0))(pNewBuffer);
+            return false;
+        }
+
+        if (SuspendThread(*phStreamingThread) == (DWORD)-1)
+        {
+            ((DeallocFunc)(0x72F4F0))(pNewBuffer);
+            return false;
+        }
+
+        if (!streaming[0].bInUse && !streaming[1].bInUse)
+            break;
+
+        ResumeThread(*phStreamingThread);
+        Sleep(0);
+    }
+
+    // Calculate new buffer pointers
+    void* const pNewBuff0 = pNewBuffer;
+    void* const pNewBuff1 = (void*)(reinterpret_cast<uintptr_t>(pNewBuffer) + 2048u * (numBlocks / 2));
+
+    // Copy existing data to new buffer
+    const auto copySizeBytes = std::min(ms_streamingHalfOfBufferSizeBlocks, numBlocks / 2) * 2048;
+    MemCpyFast(pNewBuff0, ms_pStreamingBuffer[0], copySizeBytes);
+    MemCpyFast(pNewBuff1, ms_pStreamingBuffer[1], copySizeBytes);
+
+    // Update buffer size and pointers
+    ms_streamingHalfOfBufferSizeBlocks = numBlocks / 2;
+
+    streaming[0].pBuffer = ms_pStreamingBuffer[0] = pNewBuff0;
+    streaming[1].pBuffer = ms_pStreamingBuffer[1] = pNewBuff1;
+
+    // Resume streaming thread before freeing old buffer
+    ResumeThread(*phStreamingThread);
+
+    // Free old buffer after resume to avoid blocking GTA memory manager
+    ((DeallocFunc)(0x72F4F0))(pOldBuffer);
+
+    return true;
+}
+
+void CStreamingSA::MakeSpaceFor(std::uint32_t memoryToCleanInBytes)
+{
+    (reinterpret_cast<void(__cdecl*)(std::uint32_t)>(0x40E120))(memoryToCleanInBytes);
+}
+
+std::uint32_t CStreamingSA::GetMemoryUsed() const
+{
+    return *reinterpret_cast<std::uint32_t*>(0x8E4CB4);
+}
+
+void CStreamingSA::AllocateArchive()
+{
+    // Preallocate some extra archives to skip this procedure for the next several archives
+    const size_t archivesNum = std::min(m_Imgs.size() + m_Imgs.size() * 2 + 1, MAX_IMAGES_NUM);
+    SetArchivesNum(archivesNum);
+}
+
+void CStreamingSA::RemoveBigBuildings()
+{
+    (reinterpret_cast<void(__cdecl*)()>(0x4093B0))();
+}
+
+void CStreamingSA::LoadScene(const CVector* position)
+{
+    auto CStreaming_LoadScene = (void(__cdecl*)(const CVector*))FUNC_CStreaming_LoadScene;
+    CStreaming_LoadScene(position);
+}
+
+void CStreamingSA::LoadSceneCollision(const CVector* position)
+{
+    auto CStreaming_LoadSceneCollision = (void(__cdecl*)(const CVector*))FUNC_CStreaming_LoadSceneCollision;
+    CStreaming_LoadSceneCollision(position);
+}
+
