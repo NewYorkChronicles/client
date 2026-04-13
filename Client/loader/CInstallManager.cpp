@@ -1469,7 +1469,7 @@ SString CInstallManager::_ProcessLayoutChecks()
         SString strMTADataPath = i ? GetMTADataPathCommon() : GetMTADataPath();
 
         if (!DirectoryExists(strMTADataPath))
-            ShowLayoutError("[Data directory not present]");  // Can't find directory
+            MkDir(strMTADataPath);
 
         SString strTestFilePath = PathJoin(strMTADataPath, "testdir", "testfile.txt");
 
@@ -1492,6 +1492,7 @@ SString CInstallManager::_ProcessLayoutChecks()
     }
 #endif
 
+#if MTASA_VERSION_TYPE != VERSION_TYPE_CUSTOM
     // Check reg key writable
     {
         RemoveRegistryKey("testkeypath");
@@ -1504,6 +1505,7 @@ SString CInstallManager::_ProcessLayoutChecks()
 
         RemoveRegistryKey("testkeypath");
     }
+#endif
 
     // Check install dir writable
     {
