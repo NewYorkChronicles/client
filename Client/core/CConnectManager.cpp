@@ -408,9 +408,6 @@ bool CConnectManager::StaticProcessPacket(unsigned char ucPacketID, NetBitStream
                 g_pConnectManager->m_bIsDetectingVersion = false;
                 g_pConnectManager->m_tConnectStarted = 0;
 
-                // Mark that we've connected — any future connect will restart the process
-                g_bHasEverConnected = true;
-
                 // Load the mod
                 if (!CModManager::GetSingleton().Load(strArguments))
                 {
@@ -418,6 +415,10 @@ bool CConnectManager::StaticProcessPacket(unsigned char ucPacketID, NetBitStream
                     strArguments.Format(_("No such mod installed (%s)"), strModName.c_str());
                     CCore::GetSingleton().ShowMessageBox(_("Error") + _E("CC31"), strArguments, MB_BUTTON_OK | MB_ICON_ERROR);  // Mod loading failed
                     g_pConnectManager->Abort();
+                }
+                else
+                {
+                    g_bHasEverConnected = true;
                 }
             }
             else
