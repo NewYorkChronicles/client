@@ -14,7 +14,6 @@
 using namespace std;
 
 static CConnectManager* g_pConnectManager = NULL;
-static bool             g_bHasEverConnected = false;
 extern CCore*           g_pCore;
 
 CConnectManager::CConnectManager()
@@ -47,17 +46,6 @@ CConnectManager::~CConnectManager()
     g_pConnectManager = NULL;
 }
 
-// Restart the game process and connect to the given server.
-// With FLA extended model limits (29000+), the SA streaming system can't cleanly
-// reinitialize after disconnect — ReinitStreaming causes white textures and crashes.
-// A full process restart guarantees a clean streaming state.
-static void RestartAndConnect(const char* szHost, unsigned short usPort)
-{
-    SString strURL("nyc://%s:%u", szHost, usPort);
-    ShellExecuteNonBlocking("open", strURL);
-    TerminateProcess(GetCurrentProcess(), 0);
-}
-
 
 bool CConnectManager::Connect(const char* szHost, unsigned short usPort, const char* szNick, const char* szPassword, bool bNotifyServerBrowser)
 {
@@ -65,12 +53,6 @@ bool CConnectManager::Connect(const char* szHost, unsigned short usPort, const c
     assert(szNick);
     assert(szPassword);
 
-    // If we've been connected before, restart the process to get a clean streaming state
-    if (g_bHasEverConnected)
-    {
-        RestartAndConnect(szHost, usPort);
-        return true;
-    }
 
     if (!CCore::GetSingleton().IsNetworkReady())
     {
@@ -178,21 +160,26 @@ bool CConnectManager::Connect(const char* szHost, unsigned short usPort, const c
 
 bool CConnectManager::Reconnect(const char* szHost, unsigned short usPort, const char* szPassword, bool bSave)
 {
-    // Resolve host and port from saved settings if not provided
-    std::string strHost;
+    CVARS_GET("host", m_strHost);
     unsigned int uiPort = 0;
-    CVARS_GET("host", strHost);
     CVARS_GET("port", uiPort);
     if (uiPort == 0 || uiPort > 0xFFFF)
         uiPort = 22003;
+    m_usPort = static_cast<unsigned short>(uiPort);
+
+    if (!szHost || !szHost[0] || m_strHost == szHost)
+        if (usPort == 0 || m_usPort == usPort)
+            CVARS_GET("password", m_strPassword);
 
     if (szHost && szHost[0])
-        strHost = szHost;
+        m_strHost = szHost;
+    if (szPassword && szPassword[0])
+        m_strPassword = szPassword;
     if (usPort)
-        uiPort = usPort;
+        m_usPort = usPort;
 
-    // Always restart the process on reconnect
-    RestartAndConnect(strHost.c_str(), static_cast<unsigned short>(uiPort));
+    m_bSave = bSave;
+    m_bReconnect = true;
     return true;
 }
 
@@ -415,10 +402,6 @@ bool CConnectManager::StaticProcessPacket(unsigned char ucPacketID, NetBitStream
                     strArguments.Format(_("No such mod installed (%s)"), strModName.c_str());
                     CCore::GetSingleton().ShowMessageBox(_("Error") + _E("CC31"), strArguments, MB_BUTTON_OK | MB_ICON_ERROR);  // Mod loading failed
                     g_pConnectManager->Abort();
-                }
-                else
-                {
-                    g_bHasEverConnected = true;
                 }
             }
             else

@@ -416,11 +416,7 @@ CClientGame::~CClientGame()
     // if a vehicle is destroyed while it explodes.
     g_pGame->GetExplosionManager()->RemoveAllExplosions();
 
-    // Reset custom streaming memory size [possibly] set by the server...
-    g_pCore->SetCustomStreamingMemory(0);
-
-    // ...and restore the buffer size too
-    g_pGame->GetStreaming()->SetStreamingBufferSize(g_pClientGame->GetManager()->GetIMGManager()->GetLargestFileSizeBlocks());
+    // NYC: keep streaming memory settings on disconnect
 
     // Reset camera shaking
     g_pGame->GetCamera()->SetShakeForce(0.0f);
@@ -571,14 +567,13 @@ CClientGame::~CClientGame()
 
     SAFE_DELETE(m_pRootEntity);
 
-    // Clear any remaining texture replacement/shader state after destroying entities.
-    // This ordering prevents global reset from running before late element destructors
-    // (e.g. CClientTXD) have a chance to clean up using RenderWare bookkeeping.
-    if (g_pGame && g_pGame->GetRenderWare())
-    {
-        g_pGame->GetRenderWare()->StaticResetModelTextureReplacing();
-        g_pGame->GetRenderWare()->StaticResetShaderSupport();
-    }
+    // NYC: skip texture/shader reset on disconnect to prevent white textures
+    // The process restarts on reconnect anyway, so no cleanup needed
+    // if (g_pGame && g_pGame->GetRenderWare())
+    // {
+    //     g_pGame->GetRenderWare()->StaticResetModelTextureReplacing();
+    //     g_pGame->GetRenderWare()->StaticResetShaderSupport();
+    // }
 
     SAFE_DELETE(m_pModelCacheManager);
     // SAFE_DELETE(m_pGameEntityXRefManager);
