@@ -46,7 +46,7 @@ static void TEADecrypt(const uint8_t* in, uint8_t* out, uint32_t size, const uin
     }
 }
 
-static void XORDecrypt(uint8_t* data, uint32_t size, const uint8_t* key16)
+static __forceinline void XORDecrypt(uint8_t* data, uint32_t size, const uint8_t* key16)
 {
     uint32_t k[4];
     memcpy(k, key16, 16);
@@ -150,7 +150,9 @@ static int __cdecl Hook_ReadEntry(int h, char* buf, int sz)
 static void DecryptStreamingBuffer(char* pBuffer, int)
 {
     uint8_t* buf = reinterpret_cast<uint8_t*>(pBuffer);
-    if (memcmp(buf, "RINWARES", 8) != 0)
+    if (*reinterpret_cast<uint32_t*>(buf) != 0x574E4952)
+        return;
+    if (*reinterpret_cast<uint32_t*>(buf + 4) != 0x53455241)
         return;
 
     uint32_t encDataSize;
@@ -171,7 +173,6 @@ static void DecryptStreamingBuffer(char* pBuffer, int)
         TEADecrypt(encData, encData, encDataSize, dataKey);
 
     memmove(buf, encData, encDataSize);
-    memset(buf + encDataSize, 0, 44);
 }
 
 #define HOOKPOS_CStreaming__ConvertBufferToObject_Pre  0x40C6B0
