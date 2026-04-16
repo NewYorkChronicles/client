@@ -442,6 +442,9 @@ __declspec(noinline) int _cdecl OnCPlayerPed_ProcessAnimGroups_Mid(CPlayerPedSAI
         }
     }
 
+    if (pPlayerPedSAInterface->Weapons[pPlayerPedSAInterface->bCurrentWeaponSlot].m_eWeaponType == WEAPONTYPE_CAMERA)
+        return 140;
+
     return iReqMoveAnim;
 }
 

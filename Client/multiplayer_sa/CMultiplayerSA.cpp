@@ -8041,3 +8041,4 @@ void _declspec(naked) HOOK_CCollision__CheckCameraCollisionObjects()
     }
     // clang-format on
 }
+

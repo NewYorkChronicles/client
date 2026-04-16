@@ -1484,52 +1484,24 @@ void CClientGame::DoPulses()
     }
     // stop players dying from starvation
     g_pGame->GetPlayerInfo()->SetLastTimeEaten(0);
-    // reset weapon logs (for preventing quickreload)
 
-    // NYC walk/run tweaks: swap to Umbrella2 anim group (140) when holding camera (wep 43),
-    // and override movement anim speeds every frame (engine resets them each tick).
     {
-        static bool           s_active = false;
-        static unsigned short s_savedGroup = 0;
-
         void* pPed = *(void**)0xB6F5F0;
-        if (!pPed) { s_active = false; }
-        else
+        if (pPed)
         {
             void* pClump = *(void**)((char*)pPed + 0x18);
             if (pClump)
             {
-                unsigned char   weapSlot = *(unsigned char*)((char*)pPed + 0x718);
-                unsigned int    weapType = *(unsigned int*)((char*)pPed + 0x5A0 + weapSlot * 0x1C);
-                unsigned short* pGroup   = (unsigned short*)((char*)pPed + 0x4D0);
-
-                if (weapType == 43)
+                typedef void* (__cdecl *GetAssoc_t)(void*, const char*);
+                static const auto GetAssoc = (GetAssoc_t)0x4D6870;
+                static const struct { const char* n; float s; } kOverrides[] = {
+                    {"woman_runpanic", 1.45f}, {"sprint_panic", 1.40f},
+                    {"JUMP_LAND", 0.905f}, {"JUMP_LAUNCH", 0.85f}, {"JUMP_LAUNCH_R", 0.85f}
+                };
+                for (int i = 0; i < 5; i++)
                 {
-                    if (!s_active)
-                    {
-                        s_savedGroup = *pGroup;
-                        *pGroup = 140;
-                        s_active = true;
-                    }
-                }
-                else if (s_active)
-                {
-                    *pGroup = s_savedGroup;
-                    s_active = false;
-                }
-
-                {
-                    typedef void* (__cdecl *GetAssoc_t)(void*, const char*);
-                    static auto GetAssoc = (GetAssoc_t)0x4D6870;
-                    static const char* names[]  = {"woman_runpanic", "sprint_panic", "JUMP_LAND", "JUMP_LAUNCH", "JUMP_LAUNCH_R"};
-                    static const float speeds[] = {1.45f, 1.40f, 0.905f, 0.85f, 0.85f};
-
-                    for (int i = 0; i < 5; i++)
-                    {
-                        void* a = GetAssoc(pClump, names[i]);
-                        if (a)
-                            *(float*)((char*)a + 0x24) = speeds[i];
-                    }
+                    void* a = GetAssoc(pClump, kOverrides[i].n);
+                    if (a) *(float*)((char*)a + 0x24) = kOverrides[i].s;
                 }
             }
         }
