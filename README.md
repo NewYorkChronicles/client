@@ -28,6 +28,11 @@ Based on [multitheftauto/mtasa-blue](https://github.com/multitheftauto/mtasa-blu
 - [Forum](https://forum.newyorkchronicles.online)
 - [Discord](https://discord.newyorkchronicles.online)
 
+### Developers
+
+- Ben Horma Idriss (izcarti)
+- Merzoug Mohamed Rayane (MrSmiiith)
+
 ### License
 
 Source code is licensed under GPLv3. See [LICENSE](./LICENSE).
