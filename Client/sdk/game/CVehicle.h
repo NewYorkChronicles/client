@@ -331,4 +331,16 @@ public:
 
     virtual const CVector* GetDummyPositions() const = 0;
     virtual void           ReinitAudio() = 0;
+
+    struct SMaterialInfo
+    {
+        unsigned int index;
+        unsigned char r, g, b, a;
+        SString textureName;
+    };
+
+    virtual bool GetMaterialColors(std::vector<SMaterialInfo>& outMaterials) = 0;
+
+    virtual float GetSteerAngle() = 0;
+    virtual void  SetSteerAngle(float fAngle) = 0;
 };

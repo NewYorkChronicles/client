@@ -116,6 +116,8 @@ public:
 
     bool GetGPUEnabled() const noexcept;
 
+    CNuiCoreInterface* GetNuiCore() override;
+
 private:
     typedef std::pair<bool, eWebFilterType> WebFilterPair;
 

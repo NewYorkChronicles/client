@@ -8,6 +8,7 @@
  *****************************************************************************/
 #include "StdInc.h"
 #include "CWebApp.h"
+#include "CNuiCore.h"
 
 #include <cef3/cef/include/cef_command_line.h>
 #include <cef3/cef/include/cef_parser.h>
@@ -84,12 +85,21 @@ namespace
         commandLine->AppendSwitch("disable-prompt-on-repost");
         commandLine->AppendSwitch("disable-ipc-flooding-protection");
         commandLine->AppendSwitch("disable-renderer-backgrounding");
+        commandLine->AppendSwitchWithValue("autoplay-policy", "no-user-gesture-required");
         // Reduce V8 memory usage - game UI doesn't need large JS heaps
         commandLine->AppendSwitchWithValue("js-flags", "--max-old-space-size=128");
         // Disable GPU shader disk cache (local HTML only, no benefit)
         commandLine->AppendSwitch("disable-gpu-shader-disk-cache");
         // Disable site isolation (not needed, saves memory per browser)
         commandLine->AppendSwitch("disable-site-isolation-trials");
+        // Kill paths we never use — each saves RAM and avoids driver pitfalls on
+        // older Intel/AMD integrated GPUs.
+        commandLine->AppendSwitch("disable-webrtc-hw-decoding");
+        commandLine->AppendSwitch("disable-webrtc-hw-encoding");
+        commandLine->AppendSwitch("disable-accelerated-video-decode");
+        commandLine->AppendSwitch("disable-accelerated-video-encode");
+        commandLine->AppendSwitchWithValue("disable-features",
+            "HardwareMediaKeyHandling,MediaSessionService,GlobalMediaControls,WebUIDarkMode,MediaRouter");
 
         if (processType.empty())
         {
@@ -185,19 +195,118 @@ CefRefPtr<CefResourceHandler> CWebApp::Create(CefRefPtr<CefBrowser> browser, Cef
         return nullptr;
 
     SString host = UTF16ToMbUTF8(urlParts.host.str);
-    if (scheme_name == "http" && host == "mta")
-    {
-        // Scheme format: https://mta/resourceName/file.html or https://mta/local/file.html for the current resource
 
-        // Get resource name and path
+    // Per-resource origin alias: https://nyc-nui-<resource>/<path>
+    //   → mapped to http://mta/<resource>/<path> so it shares the resource
+    //   file pipeline. Each resource gets a unique origin for CSS scoping
+    //   and same-origin-policy separation between iframes.
+    bool isAlias = false;
+    SString aliasResource;
+    if (scheme_name == "https" && host.BeginsWith("nyc-nui-") && host.size() > 8)
+    {
+        aliasResource = host.substr(8);
+        isAlias = true;
+    }
+
+    if ((scheme_name == "http" && host == "mta") || isAlias)
+    {
         if (!urlParts.path.str)
             return HandleError("404 - Not found", 404);
 
         SString path = UTF16ToMbUTF8(urlParts.path.str);
-        if (std::size(path) < 2)
+        if (std::size(path) < 2 && !isAlias)
             return HandleError("404 - Not found", 404);
 
         path = path.substr(1);  // Remove slash at the front
+
+        // Rewrite alias path to the internal http://mta form
+        if (isAlias)
+            path = aliasResource + "/" + path;
+
+        // NUI root page — served from memory.
+        if (path == "__nui/root.html")
+        {
+            const char* html = CNuiCore::GetRootHtml();
+            const size_t len = strlen(html);
+            auto stream = CefStreamReader::CreateForData((void*)html, len);
+            if (!stream) return HandleError("500", 500);
+            return CefRefPtr<CefResourceHandler>(new CefStreamResourceHandler("text/html", stream));
+        }
+
+        // NUI RPC — http://mta/__nuirpc/<resource>/<type> with JSON POST body.
+        // CefApp::Create() runs on the IO thread; we MUST defer into the main
+        // thread before touching Lua. Dispatch via CAjaxResourceHandler which
+        // holds the connection open until SetResponse() is called on the main
+        // thread from the event queue.
+        if (path.BeginsWith("__nuirpc/") && path.size() > 9)
+        {
+            SString rest = path.substr(9);
+            size_t  slash = rest.find('/');
+            if (slash == SString::npos || slash == 0 || slash == rest.size() - 1)
+                return HandleError("400", 400);
+
+            // JS-side wraps both segments in encodeURIComponent(), so decode
+            // percent-escapes here before the lookup. Without this the
+            // registered callback name (e.g. "phone:getSettings") never
+            // matches the URL-encoded form ("phone%3AgetSettings").
+            auto urlDecode = [](const SString& s) -> SString {
+                SString out;
+                out.reserve(s.size());
+                for (size_t i = 0; i < s.size(); ++i)
+                {
+                    char c = s[i];
+                    if (c == '%' && i + 2 < s.size() && std::isxdigit((unsigned char)s[i + 1]) && std::isxdigit((unsigned char)s[i + 2]))
+                    {
+                        auto hex = [](char x) { return (x <= '9') ? x - '0' : (x <= 'F') ? x - 'A' + 10 : x - 'a' + 10; };
+                        out += (char)((hex(s[i + 1]) << 4) | hex(s[i + 2]));
+                        i += 2;
+                    }
+                    else
+                    {
+                        out += c;
+                    }
+                }
+                return out;
+            };
+
+            SString resource = urlDecode(rest.substr(0, slash));
+            SString type     = urlDecode(rest.substr(slash + 1));
+
+            SString body;
+            if (auto postData = request->GetPostData(); postData)
+            {
+                CefPostData::ElementVector elems;
+                postData->GetElements(elems);
+                for (const auto& e : elems)
+                {
+                    if (e->GetType() != CefPostDataElement::Type::PDE_TYPE_BYTES) continue;
+                    size_t n = e->GetBytesCount();
+                    if (n == 0 || n > 5 * 1024 * 1024) continue;
+                    auto buf = std::make_unique<char[]>(n);
+                    if (e->GetBytes(n, buf.get()) == n)
+                        body.assign(buf.get(), n);
+                    break;
+                }
+            }
+
+            CefRefPtr<CAjaxResourceHandler> handler(new CAjaxResourceHandler({}, {}, "application/json"));
+            CWebView*                       rootView = CNuiCore::Get().GetRoot();
+            if (!rootView)
+                return HandleError("503", 503);
+
+            g_pCore->GetWebCore()->AddEventToEventQueue(
+                [resource, type, body, handler]()
+                {
+                    SString out;
+                    if (CNuiCore::Get().InvokeCallback(resource, type, body, out))
+                        handler->SetResponse(out);
+                    else
+                        handler->SetResponse("");
+                },
+                rootView, "NuiRpc");
+
+            return handler;
+        }
         if (const auto slashPos = path.find('/'); slashPos == std::string::npos)
         {
             static constexpr auto         ERROR_404 = "404 - Not found";

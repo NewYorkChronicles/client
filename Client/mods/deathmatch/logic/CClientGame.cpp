@@ -10,6 +10,8 @@
  *****************************************************************************/
 
 #include "StdInc.h"
+#include "CClientIntegrity.h"
+#include <core/CNuiCoreInterface.h>
 #include <net/SyncStructures.h>
 #include <game/C3DMarkers.h>
 #include <game/CAnimBlendAssocGroup.h>
@@ -74,6 +76,14 @@ CVector             g_vecBulletFireEndPosition;
 #define DOUBLECLICK_MOVE_THRESHOLD   10.0f
 
 static constexpr long long TIME_DISCORD_UPDATE_RATE = 15000;
+
+
+void CClientGame::SetAuthToken(const std::string& hex)
+{
+    memset(m_authToken, 0, 16);
+    for (size_t i = 0; i < 16 && i * 2 + 1 < hex.size(); i++)
+        m_authToken[i] = static_cast<uint8_t>(strtoul(hex.substr(i * 2, 2).c_str(), nullptr, 16));
+}
 
 CClientGame::CClientGame(bool bLocalPlay) : m_ServerInfo(new CServerInfo())
 {
@@ -364,6 +374,9 @@ CClientGame::CClientGame(bool bLocalPlay) : m_ServerInfo(new CServerInfo())
     // Add our lua events
     AddBuiltInEvents();
 
+    extern void CClientGame_RegisterNuiBridge();
+    CClientGame_RegisterNuiBridge();
+
     // Load some stuff from the core config
     float fScale;
     g_pCore->GetCVars()->Get("text_scale", fScale);
@@ -547,6 +560,10 @@ CClientGame::~CClientGame()
     // Destroy our stuff
     SAFE_DELETE(m_pManager);  // Will trigger onClientResourceStop
 
+    if (g_pCore->IsWebCoreLoaded())
+        if (auto* pNui = g_pCore->GetWebCore()->GetNuiCore())
+            pNui->Reset();
+
     SAFE_DELETE(m_pNametags);
     SAFE_DELETE(m_pSyncDebug);
     SAFE_DELETE(m_pNetworkStats);
@@ -722,7 +739,8 @@ bool CClientGame::StartGame(const char* szNick, const char* szPassword, eServerT
                 pBitStream->WriteString<uchar>("");
             }
 
-            // Send the packet as joindata
+            pBitStream->Write(reinterpret_cast<const char*>(m_authToken), 16);
+
             g_pNet->SendPacket(PACKET_ID_PLAYER_JOINDATA, pBitStream, PACKET_PRIORITY_HIGH, PACKET_RELIABILITY_RELIABLE_ORDERED);
             g_pNet->DeallocateNetBitStream(pBitStream);
 
@@ -1486,22 +1504,47 @@ void CClientGame::DoPulses()
     g_pGame->GetPlayerInfo()->SetLastTimeEaten(0);
 
     {
+        static bool           s_active = false;
+        static unsigned short s_savedGroup = 0;
+
         void* pPed = *(void**)0xB6F5F0;
-        if (pPed)
+        if (!pPed) { s_active = false; }
+        else
         {
             void* pClump = *(void**)((char*)pPed + 0x18);
             if (pClump)
             {
-                typedef void* (__cdecl *GetAssoc_t)(void*, const char*);
-                static const auto GetAssoc = (GetAssoc_t)0x4D6870;
-                static const struct { const char* n; float s; } kOverrides[] = {
-                    {"woman_runpanic", 1.45f}, {"sprint_panic", 1.40f},
-                    {"JUMP_LAND", 0.905f}, {"JUMP_LAUNCH", 0.85f}, {"JUMP_LAUNCH_R", 0.85f}
-                };
-                for (int i = 0; i < 5; i++)
+                unsigned char   weapSlot = *(unsigned char*)((char*)pPed + 0x718);
+                unsigned int    weapType = *(unsigned int*)((char*)pPed + 0x5A0 + weapSlot * 0x1C);
+                unsigned short* pGroup   = (unsigned short*)((char*)pPed + 0x4D0);
+
+                if (weapType == 43)
                 {
-                    void* a = GetAssoc(pClump, kOverrides[i].n);
-                    if (a) *(float*)((char*)a + 0x24) = kOverrides[i].s;
+                    if (!s_active)
+                    {
+                        s_savedGroup = *pGroup;
+                        *pGroup = 140;
+                        s_active = true;
+                    }
+                }
+                else if (s_active)
+                {
+                    *pGroup = s_savedGroup;
+                    s_active = false;
+                }
+
+                {
+                    typedef void* (__cdecl *GetAssoc_t)(void*, const char*);
+                    static auto GetAssoc = (GetAssoc_t)0x4D6870;
+                    static const char* names[]  = {"woman_runpanic", "sprint_panic", "JUMP_LAND", "JUMP_LAUNCH", "JUMP_LAUNCH_R"};
+                    static const float speeds[] = {1.45f, 1.40f, 0.905f, 0.85f, 0.85f};
+
+                    for (int i = 0; i < 5; i++)
+                    {
+                        void* a = GetAssoc(pClump, names[i]);
+                        if (a)
+                            *(float*)((char*)a + 0x24) = speeds[i];
+                    }
                 }
             }
         }
@@ -2814,6 +2857,11 @@ void CClientGame::AddBuiltInEvents()
     m_Events.AddEvent("onClientBrowserInputFocusChanged", "gainedfocus", NULL, false);
     m_Events.AddEvent("onClientBrowserResourceBlocked", "url, domain, reason", NULL, false);
     m_Events.AddEvent("onClientBrowserConsoleMessage", "message, source, line, level", nullptr, false);
+
+    // NUI events
+    m_Events.AddEvent("onClientNuiReady", "resource", nullptr, false);
+    m_Events.AddEvent("onClientNuiMessage", "resource, event, data", nullptr, false);
+    m_Events.AddEvent("onClientNuiConsoleMessage", "resource, level, message, source, line", nullptr, false);
 
     // Misc events
     m_Events.AddEvent("onClientFileDownloadComplete", "fileName, success", NULL, false);
@@ -6741,7 +6789,7 @@ void CClientGame::SetFileCacheRoot()
         if (!strFileCachePath.empty() && DirectoryExists(strFileCachePath))
         {
             // Check writable
-            SString strTestFileName = PathJoin(strFileCachePath, "cache", "_test.tmp");
+            SString strTestFileName = PathJoin(strFileCachePath, "resources", "_test.tmp");
             if (FileSave(strTestFileName, "x"))
             {
                 FileDelete(strTestFileName);
@@ -6766,7 +6814,6 @@ void CClientGame::SetFileCacheRoot()
         else
             AddReportLog(7413, SString("CClientGame::SetFileCacheRoot - Change shared from '%s' to '%s'", *strFileCachePath, *m_strFileCacheRoot));
     }
-
 }
 
 bool CClientGame::TriggerBrowserRequestResultEvent(const std::unordered_set<SString>& newPages)
@@ -7176,4 +7223,74 @@ void CClientGame::AudioZoneRadioSwitchHandler(DWORD dwStationID)
     {
         g_pGame->GetAudioEngine()->StartRadio(dwStationID);
     }
+}
+
+namespace
+{
+    struct LuaNuiBridge final : public INuiEventListener
+    {
+        void OnNuiMessage(const SString& resource, const SString& event, const SString& data) override
+        {
+            if (!g_pClientGame) return;
+            CClientEntity* root = g_pClientGame->GetRootEntity();
+            if (!root) return;
+            CLuaArguments args;
+            args.PushString(resource);
+            args.PushString(event);
+            args.PushString(data);
+            root->CallEvent("onClientNuiMessage", args, false);
+        }
+
+        void OnNuiReady(const SString& resource) override
+        {
+            if (!g_pClientGame) return;
+            CClientEntity* root = g_pClientGame->GetRootEntity();
+            if (!root) return;
+            CLuaArguments args;
+            args.PushString(resource);
+            root->CallEvent("onClientNuiReady", args, false);
+        }
+
+        void OnNuiConsole(const SString& resource, int level, const SString& msg, const SString& src, int line) override
+        {
+            if (!g_pClientGame) return;
+            CClientEntity* root = g_pClientGame->GetRootEntity();
+            if (!root) return;
+            CLuaArguments args;
+            args.PushString(resource);
+            args.PushNumber(level);
+            args.PushString(msg);
+            args.PushString(src);
+            args.PushNumber(line);
+            root->CallEvent("onClientNuiConsoleMessage", args, false);
+        }
+
+        // Mirror of CClientWebBrowser::Events_OnResourceFileCheck, with the
+        // ":res/path" → disk-path translation that the NUI root browser
+        // skips (no owning resource).
+        bool LoadResourceFile(const SString& path, CBuffer& outData) override
+        {
+            if (!g_pClientGame) return false;
+
+            CResource*  pRes = nullptr;
+            std::string strDiskPath;
+            if (!CResourceManager::ParseResourcePathInput(std::string(path), pRes, &strDiskPath))
+                return false;
+
+            auto* pFile = g_pClientGame->GetResourceManager()->GetDownloadableResourceFile(SStringX(strDiskPath.c_str()).ToLower());
+            if (!pFile) return false;
+
+            pFile->GenerateClientChecksum(outData);
+            return pFile->DoesClientAndServerChecksumMatch();
+        }
+    };
+
+    LuaNuiBridge g_NuiBridge;
+}
+
+void CClientGame_RegisterNuiBridge()
+{
+    if (auto* wc = g_pCore->GetWebCore())
+        if (auto* nui = wc->GetNuiCore())
+            nui->SetEventListener(&g_NuiBridge);
 }

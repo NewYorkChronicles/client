@@ -39,6 +39,7 @@ public:
     void                    RemoveStreamReference(bool bScript = false);
     unsigned short          GetStreamReferences(bool bScript = false);
     unsigned long           GetTotalStreamReferences() { return m_usStreamReferences + m_usStreamReferencesScript; }
+    std::uint32_t           GetLastStreamOutTime() const { return m_lastStreamOutTime; }
     void                    StreamOutForABit();
     void                    SetDimension(unsigned short usDimension) override;
     float                   GetExpDistance() { return m_fExpDistance; }
@@ -64,6 +65,7 @@ protected:
     CClientStreamer* m_pStreamer;
     bool             m_bStreamedIn;
     bool             m_bAttemptingToStreamIn;
+    std::uint32_t    m_lastStreamOutTime;
 
 public:
     float                   m_fCachedRadius;

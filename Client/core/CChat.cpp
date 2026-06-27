@@ -64,6 +64,15 @@ CChat::CChat(CGUI* pManager, const CVector2D& vecPosition)
     m_eTextAlign = Chat::Text::Align::LEFT;
     m_iSelectedInputHistoryEntry = -1;
     m_iCharacterLimit = m_iDefaultCharacterLimit;
+    m_bTimestamps = true;
+    m_bShowSuggestions = true;
+    m_bShowScrollbar = true;
+    m_iCursorPos = 0;
+    m_iSelStart = -1;
+    m_fInputScrollX = 0;
+    m_dwCursorBlink = 0;
+    m_iSelectedSuggestion = -1;
+    m_fInputBoxX = m_fInputBoxY = m_fInputBoxW = m_fInputBoxH = 0;
 
     // Background area
     m_pBackground = m_pManager->CreateStaticImage();
@@ -140,6 +149,17 @@ void CChat::LoadCVars()
     CVARS_GET("chat_font", (unsigned int&)Font);
     SetChatFont((eChatFont)Font);
     CVARS_GET("chat_nickcompletion", m_bNickCompletion);
+    CVARS_GET("chat_timestamps", m_bTimestamps);
+    CVARS_GET("chat_suggestions", m_bShowSuggestions);
+    CVARS_GET("chat_scrollbar", m_bShowScrollbar);
+    CVARS_GET("chat_scrollbar_always", m_bScrollbarAlways);
+    CVARS_GET("chat_input_border_color", m_InputBorderColor);
+    CVARS_GET("chat_input_box_color", m_InputBoxColor);
+    CVARS_GET("chat_suggestion_bg_color", m_SuggestionBgColor);
+    CVARS_GET("chat_suggestion_text_color", m_SuggestionTextColor);
+    CVARS_GET("chat_scrollbar_track_color", m_ScrollTrackColor);
+    CVARS_GET("chat_scrollbar_thumb_color", m_ScrollThumbColor);
+    CVARS_GET("chat_caret_color", m_CaretColor);
     CVARS_GET("chat_position_offset_x", m_fPositionOffsetX);
     CVARS_GET("chat_position_offset_y", m_fPositionOffsetY);
     CVARS_GET("chat_position_horizontal", (unsigned int&)m_ePositionHorizontal);
@@ -257,6 +277,9 @@ void CChat::Draw(bool bUseCacheTexture, bool bAllowOutline)
     pGraphics->SetBlendMode(EBlendMode::ADD);
     pGraphics->DrawTexture(m_pCacheTexture, chatTopLeft.fX, chatTopLeft.fY);
     pGraphics->SetBlendMode(EBlendMode::BLEND);
+
+    DrawScrollbar();
+    DrawSuggestions();
 }
 
 //
@@ -368,25 +391,85 @@ void CChat::GetDrawList(SDrawList& outDrawList, bool bUsingOutline)
 //
 void CChat::DrawInputLine(bool bUsingOutline)
 {
-    if (m_InputColor.A * m_fInputBackgroundAlpha > 0.f)
+    if (!m_bInputVisible)
+        return;
+
+    CGraphics*        pGraphics = CGraphics::GetSingletonPtr();
+    IDirect3DDevice9* pDevice = pGraphics->GetDevice();
+    float fAlpha = (m_fInputBackgroundAlpha > 0.f) ? m_fInputBackgroundAlpha : 1.0f;
+    float fLineH = CChat::GetFontHeight(m_vecScale.fY);
+    float fX = m_vecBackgroundPosition.fX + (5.0f * m_vecScale.fX);
+    float fY = m_vecBackgroundPosition.fY + m_vecBackgroundSize.fY + (4.0f * m_vecScale.fY);
+    float fW = m_vecBackgroundSize.fX * 0.70f;
+    float fH = fLineH * 1.5f;
+    float fBdr = 1.0f * m_vecScale.fX;
+    float fPadX = 10.0f * m_vecScale.fX;
+    float fPadY = (fH - fLineH) * 0.5f;
+    m_fInputBoxX = fX;
+    m_fInputBoxY = fY;
+    m_fInputBoxW = fW;
+    m_fInputBoxH = fH;
+
+    unsigned char ucBdrA = (unsigned char)(m_InputBorderColor.A * fAlpha);
+    unsigned char ucBgA = (unsigned char)(m_InputBoxColor.A * fAlpha);
+    pGraphics->DrawRectangle(fX, fY, fW, fH, COLOR_ARGB(ucBdrA, m_InputBorderColor.R, m_InputBorderColor.G, m_InputBorderColor.B));
+    pGraphics->DrawRectangle(fX + fBdr, fY + fBdr, fW - fBdr * 2, fH - fBdr * 2, COLOR_ARGB(ucBgA, m_InputBoxColor.R, m_InputBoxColor.G, m_InputBoxColor.B));
+
+    const char* szPrefix = m_InputLine.m_Prefix.GetText();
+    std::string strFull = std::string(szPrefix) + m_strInputText;
+    float fPrefixW = GetTextExtent(szPrefix, m_vecScale.fX);
+    float fCursorOffset = (m_iCursorPos >= (int)m_strInputText.size())
+        ? GetTextExtent(strFull.c_str(), m_vecScale.fX)
+        : GetTextExtent(strFull.substr(0, strlen(szPrefix) + m_iCursorPos).c_str(), m_vecScale.fX);
+    float fVisibleW = fW - fPadX * 2;
+    float fFullW = GetTextExtent(strFull.c_str(), m_vecScale.fX);
+
+    if (fFullW <= fVisibleW) m_fInputScrollX = 0;
+    else if (fCursorOffset - m_fInputScrollX > fVisibleW) m_fInputScrollX = fCursorOffset - fVisibleW + 10 * m_vecScale.fX;
+    else if (fCursorOffset < m_fInputScrollX) m_fInputScrollX = fCursorOffset;
+    if (m_fInputScrollX < 0) m_fInputScrollX = 0;
+
+    RECT rcScissor = { (LONG)(fX + fBdr), (LONG)fY, (LONG)(fX + fW - fBdr), (LONG)(fY + fH) };
+    pDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, TRUE);
+    pDevice->SetScissorRect(&rcScissor);
+
+    float fDrawX = fX + fPadX - m_fInputScrollX;
+    float fDrawY = fY + fPadY;
+    float fSelPad = 6.0f * m_vecScale.fY;
+    int iPrefixLen = (int)strlen(szPrefix);
+
+    if (HasSelection())
     {
-        if (m_pInput)
-        {
-            // Hack to draw the input background behind the text.
-            m_pInput->SetAlpha(m_fInputBackgroundAlpha);
-            m_pInput->SetVisible(true);
-            m_pInput->Render();
-            m_pInput->SetVisible(false);
-        }
+        int s0 = std::min(m_iSelStart, m_iCursorPos), s1 = std::max(m_iSelStart, m_iCursorPos);
+        float fX0 = fDrawX + GetTextExtent(strFull.substr(0, iPrefixLen + s0).c_str(), m_vecScale.fX);
+        float fX1 = fDrawX + GetTextExtent(strFull.substr(0, iPrefixLen + s1).c_str(), m_vecScale.fX);
+        pGraphics->DrawRectangle(fX0, fY + fSelPad, fX1 - fX0, fH - fSelPad * 2, COLOR_ARGB(80, 80, 130, 220));
     }
 
-    if (m_bInputVisible)
-    {
-        float     fLineDifference = CChat::GetFontHeight(m_vecScale.fY);
-        bool      bInputShadow = (m_InputColor.A * m_fInputBackgroundAlpha == 0.f) && !bUsingOutline;
-        CVector2D vecPosition(m_vecInputPosition.fX + (5.0f * m_vecScale.fX), m_vecInputPosition.fY + (fLineDifference * 0.125f));
-        m_InputLine.Draw(vecPosition, 255, bInputShadow, bUsingOutline);
-    }
+    CColor prefixColor;
+    m_InputLine.m_Prefix.GetColor(prefixColor);
+    CRect2D rcP(fDrawX, fDrawY, fDrawX + 4000, fDrawY + fLineH);
+    DrawTextString(szPrefix, rcP, 0, rcP, DT_LEFT | DT_TOP | DT_NOCLIP,
+        COLOR_ARGB(255, prefixColor.R, prefixColor.G, prefixColor.B), m_vecScale.fX, m_vecScale.fY, false, rcP);
+
+    CRect2D rcT(fDrawX + fPrefixW, fDrawY, fDrawX + fPrefixW + 4000, fDrawY + fLineH);
+    DrawTextString(m_strInputText.c_str(), rcT, 0, rcT, DT_LEFT | DT_TOP | DT_NOCLIP,
+        COLOR_ARGB(m_InputTextColor.A, m_InputTextColor.R, m_InputTextColor.G, m_InputTextColor.B),
+        m_vecScale.fX, m_vecScale.fY, false, rcT);
+
+    pGraphics->DrawRectangle(fDrawX + fCursorOffset, fY + fSelPad, 1.5f * m_vecScale.fX, fH - fSelPad * 2,
+        COLOR_ARGB(m_CaretColor.A, m_CaretColor.R, m_CaretColor.G, m_CaretColor.B));
+
+    pDevice->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+
+    char szCounter[16];
+    int iCharCount = MultiByteToWideChar(CP_UTF8, 0, m_strInputText.c_str(), (int)m_strInputText.size(), nullptr, 0);
+    sprintf_s(szCounter, "%d/%d", iCharCount, m_iCharacterLimit);
+    float fCntW = GetTextExtent(szCounter, m_vecScale.fX * 0.75f);
+    CRect2D rcC(fX + fW - fCntW - 4 * m_vecScale.fX, fY + fH + 3 * m_vecScale.fY,
+                fX + fW, fY + fH + fLineH + 3 * m_vecScale.fY);
+    DrawTextString(szCounter, rcC, 0, rcC, DT_LEFT | DT_TOP | DT_NOCLIP,
+        COLOR_ARGB(128, 255, 255, 255), m_vecScale.fX * 0.75f, m_vecScale.fY * 0.75f, false, rcC);
 }
 
 //
@@ -486,8 +569,27 @@ void CChat::UpdateSmoothScroll(float* pfPixelScroll, int* piLineScroll)
 void CChat::Output(const char* szText, bool bColorCoded)
 {
     CChatLine*  pLine = NULL;
-    const char* szRemainingText = szText;
     CColor      color = m_TextColor;
+
+    std::string strTimestamped;
+    bool bHasContent = szText && szText[0] != '\0';
+    if (bHasContent)
+    {
+        const char* p = szText;
+        bHasContent = false;
+        while (*p) { if (*p != ' ' && *p != '\t') { bHasContent = true; break; } p++; }
+    }
+    if (m_bTimestamps && bHasContent)
+    {
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        char ts[16];
+        sprintf_s(ts, "[%02d:%02d:%02d] ", st.wHour, st.wMinute, st.wSecond);
+        strTimestamped = std::string(ts) + szText;
+        szText = strTimestamped.c_str();
+    }
+
+    const char* szRemainingText = szText;
 
     // Allow smooth scroll when text is added if game FX Quality is not low
     CGameSettings* gameSettings = CCore::GetSingleton().GetGame()->GetSettings();
@@ -519,6 +621,10 @@ void CChat::ClearInput()
 {
     m_strInputText.clear();
     m_InputLine.Clear();
+    m_iCursorPos = 0;
+    m_iSelStart = -1;
+    m_fInputScrollX = 0;
+    m_dwCursorBlink = GetTickCount32();
     m_vecInputSize = CalcInputSize();
 
     if (m_pInput)
@@ -582,37 +688,49 @@ void CChat::SelectInputHistoryEntry(int iEntry)
     // Clear input
     ClearInput();
 
-    // If we haven't selected any history entry, use our saved input text
     if (m_iSelectedInputHistoryEntry == -1)
         SetInputText(m_strSavedInputText.c_str());
     else
     {
         SString& strSelectedInputHistoryEntry = m_pInputHistory->Get(m_iSelectedInputHistoryEntry)->temp;
-        // If the selected entry isn't empty, fill it in
         if (!strSelectedInputHistoryEntry.empty())
             SetInputText(strSelectedInputHistoryEntry.c_str());
     }
+    m_iCursorPos = (int)m_strInputText.size();
+    m_iSelStart = -1;
 }
 
 bool CChat::SetNextHistoryText()
 {
-    // If we can't take input or we're at the end of the list, stop here
-    if (!CanTakeInput() || m_iSelectedInputHistoryEntry >= m_pInputHistory->Size() - 1)
+    if (!CanTakeInput())
         return false;
 
-    // Select the previous entry
-    SelectInputHistoryEntry(m_iSelectedInputHistoryEntry + 1);
+    if (!m_Suggestions.empty())
+    {
+        int iMax = std::min((int)m_Suggestions.size(), CHAT_MAX_SUGGESTIONS) - 1;
+        m_iSelectedSuggestion = (m_iSelectedSuggestion <= 0) ? iMax : m_iSelectedSuggestion - 1;
+        return true;
+    }
 
+    if (m_iSelectedInputHistoryEntry >= m_pInputHistory->Size() - 1)
+        return false;
+
+    SelectInputHistoryEntry(m_iSelectedInputHistoryEntry + 1);
     return true;
 }
 
 bool CChat::SetPreviousHistoryText()
 {
-    // If we can't take input, stop here
     if (!CanTakeInput())
         return false;
 
-    // Select the next entry, or the default entry
+    if (!m_Suggestions.empty())
+    {
+        int iMax = std::min((int)m_Suggestions.size(), CHAT_MAX_SUGGESTIONS) - 1;
+        m_iSelectedSuggestion = (m_iSelectedSuggestion >= iMax) ? 0 : m_iSelectedSuggestion + 1;
+        return true;
+    }
+
     if (m_pInputHistory->Size() > 0 && m_iSelectedInputHistoryEntry > 0)
         SelectInputHistoryEntry(m_iSelectedInputHistoryEntry - 1);
     else
@@ -631,20 +749,36 @@ bool CChat::CharacterKeyHandler(CGUIKeyEventArgs KeyboardArgs)
     {
         case VK_BACK:
         {
-            if (m_strInputText.size() > 0)
+            if (HasSelection())
             {
-                // Convert our string to UTF8 before resizing, then back to ANSI.
-                std::wstring strText = MbUTF8ToUTF16(m_strInputText);
-                strText.resize(strText.size() - 1);
-                SetInputText(UTF16ToMbUTF8(strText).c_str());
+                DeleteSelection();
             }
+            else if (m_iCursorPos > 0)
+            {
+                int prev = Utf8PrevChar(m_iCursorPos);
+                m_strInputText.erase(prev, m_iCursorPos - prev);
+                m_iCursorPos = prev;
+                SetInputText(m_strInputText.c_str());
+            }
+            m_iSelStart = -1;
+            m_dwCursorBlink = GetTickCount32();
             break;
         }
 
         case VK_RETURN:
         {
-            // Empty the chat and hide the input stuff
-            // If theres a command to call, call it
+            if (!m_Suggestions.empty() && m_iSelectedSuggestion >= 0 && m_iSelectedSuggestion < (int)m_Suggestions.size())
+            {
+                std::string strNew = "/" + std::string(m_Suggestions[m_iSelectedSuggestion].strCommand) + " ";
+                m_Suggestions.clear();
+                m_iSelectedSuggestion = -1;
+                m_iSelStart = -1;
+                m_strInputText = strNew;
+                SetInputText(strNew.c_str());
+                m_iCursorPos = (int)m_strInputText.size();
+                break;
+            }
+
             if (!m_strCommand.empty() && !m_strInputText.empty())
                 CCommands::GetSingleton().Execute(m_strCommand.c_str(), m_strInputText.c_str());
 
@@ -684,6 +818,22 @@ bool CChat::CharacterKeyHandler(CGUIKeyEventArgs KeyboardArgs)
 
         case VK_TAB:
         {
+            if (!m_Suggestions.empty())
+            {
+                int si = (m_iSelectedSuggestion >= 0) ? m_iSelectedSuggestion : 0;
+                if (si < (int)m_Suggestions.size())
+                {
+                    std::string strNew = "/" + std::string(m_Suggestions[si].strCommand) + " ";
+                    m_Suggestions.clear();
+                    m_iSelectedSuggestion = -1;
+                    m_iSelStart = -1;
+                    m_strInputText = strNew;
+                    SetInputText(strNew.c_str());
+                    m_iCursorPos = (int)m_strInputText.size();
+                }
+                break;
+            }
+
             if (m_bNickCompletion && m_strInputText.size() > 0)
             {
                 bool bSuccess = false;
@@ -801,30 +951,58 @@ bool CChat::CharacterKeyHandler(CGUIKeyEventArgs KeyboardArgs)
                 break;
             }
 
-            // If we haven't exceeded the maximum number of characters per chat message, append the char to the message and update the input control
+            // Ctrl+A select all
+            if (KeyboardArgs.codepoint == 1) // Ctrl+A = codepoint 1
+            {
+                m_iSelStart = 0;
+                m_iCursorPos = (int)m_strInputText.size();
+                m_dwCursorBlink = GetTickCount32();
+                break;
+            }
+            // Ctrl+C copy
+            if (KeyboardArgs.codepoint == 3) // Ctrl+C = codepoint 3
+            {
+                CopySelection();
+                break;
+            }
+            // Ctrl+X cut
+            if (KeyboardArgs.codepoint == 24) // Ctrl+X = codepoint 24
+            {
+                CopySelection();
+                if (HasSelection()) DeleteSelection();
+                break;
+            }
+            // Ctrl+V paste
+            if (KeyboardArgs.codepoint == 22) // Ctrl+V = codepoint 22
+            {
+                PasteClipboard();
+                m_iCursorPos = (int)m_strInputText.size();
+                m_dwCursorBlink = GetTickCount32();
+                break;
+            }
+
             if (MbUTF8ToUTF16(m_strInputText).size() < static_cast<std::size_t>(m_iCharacterLimit))
             {
                 if (KeyboardArgs.codepoint >= 32)
                 {
+                    if (HasSelection()) DeleteSelection();
+
                     unsigned int uiCharacter = KeyboardArgs.codepoint;
-                    if (uiCharacter < 127)  // we have any char from ASCII
+                    if (uiCharacter < 127)
                     {
-                        // injecting as is
-                        m_strInputText += static_cast<char>(KeyboardArgs.codepoint);
-                        SetInputText(m_strInputText.c_str());
+                        m_strInputText.insert(m_strInputText.begin() + m_iCursorPos, static_cast<char>(uiCharacter));
+                        m_iCursorPos++;
                     }
-                    else  // we have any char from Extended ASCII, any ANSI code page or UNICODE range
+                    else
                     {
-                        // Generate a null-terminating string for our character
                         wchar_t wUNICODE[2] = {static_cast<wchar_t>(uiCharacter), '\0'};
-
-                        // Convert our UTF character into an ANSI string
-                        std::string strANSI = UTF16ToMbUTF8(wUNICODE);
-
-                        // Append the ANSI string, and update
-                        m_strInputText.append(strANSI);
-                        SetInputText(m_strInputText.c_str());
+                        std::string strUTF8 = UTF16ToMbUTF8(wUNICODE);
+                        m_strInputText.insert(m_iCursorPos, strUTF8);
+                        m_iCursorPos += (int)strUTF8.size();
                     }
+                    m_iSelStart = -1;
+                    m_dwCursorBlink = GetTickCount32();
+                    SetInputText(m_strInputText.c_str());
                 }
             }
             break;
@@ -851,6 +1029,8 @@ void CChat::SetInputVisible(bool bVisible)
     {
         ClearInput();
         ResetHistoryChanges();
+        m_Suggestions.clear();
+        m_iSelectedSuggestion = -1;
     }
 
     m_bInputVisible = bVisible;
@@ -1044,6 +1224,8 @@ void CChat::SetInputText(const char* szText)
         m_pInput->SetSize(m_vecInputSize);
         UpdatePosition();
     }
+
+    UpdateSuggestions();
 }
 
 void CChat::SetCommand(const char* szCommand)
@@ -1358,4 +1540,174 @@ float CChatLineSection::GetWidth()
         m_uiCachedLength = m_strText.size();
     }
     return m_fCachedWidth * g_pChat->m_vecScale.fX;
+}
+
+int CChat::Utf8PrevChar(int pos)
+{
+    if (pos <= 0) return 0;
+    pos--;
+    while (pos > 0 && (m_strInputText[pos] & 0xC0) == 0x80) pos--;
+    return pos;
+}
+
+int CChat::Utf8NextChar(int pos)
+{
+    int len = (int)m_strInputText.size();
+    if (pos >= len) return len;
+    pos++;
+    while (pos < len && (m_strInputText[pos] & 0xC0) == 0x80) pos++;
+    return pos;
+}
+
+void CChat::DeleteSelection()
+{
+    if (m_iSelStart < 0 || m_iSelStart == m_iCursorPos) return;
+    int s0 = std::min(m_iSelStart, m_iCursorPos);
+    int s1 = std::max(m_iSelStart, m_iCursorPos);
+    m_strInputText.erase(s0, s1 - s0);
+    m_iCursorPos = s0;
+    m_iSelStart = -1;
+    SetInputText(m_strInputText.c_str());
+}
+
+void CChat::CopySelection()
+{
+    if (!HasSelection()) return;
+    int s0 = std::min(m_iSelStart, m_iCursorPos);
+    int s1 = std::max(m_iSelStart, m_iCursorPos);
+    std::string sel = m_strInputText.substr(s0, s1 - s0);
+    std::wstring ws = MbUTF8ToUTF16(sel);
+    if (OpenClipboard(nullptr))
+    {
+        EmptyClipboard();
+        HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, (ws.size() + 1) * sizeof(wchar_t));
+        if (hg)
+        {
+            memcpy(GlobalLock(hg), ws.c_str(), (ws.size() + 1) * sizeof(wchar_t));
+            GlobalUnlock(hg);
+            SetClipboardData(CF_UNICODETEXT, hg);
+        }
+        CloseClipboard();
+    }
+}
+
+void CChat::PasteClipboard()
+{
+    if (HasSelection()) DeleteSelection();
+    if (OpenClipboard(nullptr))
+    {
+        HANDLE hg = GetClipboardData(CF_UNICODETEXT);
+        if (hg)
+        {
+            wchar_t* ws = (wchar_t*)GlobalLock(hg);
+            if (ws)
+            {
+                std::string utf8 = UTF16ToMbUTF8(ws);
+                GlobalUnlock(hg);
+                m_strInputText.insert(m_iCursorPos, utf8);
+                m_iCursorPos += (int)utf8.size();
+                SetInputText(m_strInputText.c_str());
+            }
+        }
+        CloseClipboard();
+    }
+    m_iSelStart = -1;
+}
+
+void CChat::UpdateSuggestions()
+{
+    m_Suggestions.clear();
+    m_iSelectedSuggestion = -1;
+    if (!m_bShowSuggestions || !m_bInputVisible || m_strInputText.size() < 2 || m_strInputText[0] != '/')
+        return;
+    if (m_strInputText.find(' ') != std::string::npos)
+        return;
+
+    CModManager* pModManager = CModManager::GetSingletonPtr();
+    if (!pModManager || !pModManager->IsLoaded() || !pModManager->GetClient())
+        return;
+
+    std::string prefix = m_strInputText.substr(1);
+    std::vector<std::pair<SString, SString>> results;
+    pModManager->GetClient()->GetCommandSuggestions(prefix.c_str(), results);
+
+    for (auto& r : results)
+    {
+        if ((int)m_Suggestions.size() >= CHAT_MAX_SUGGESTIONS) break;
+        m_Suggestions.push_back({r.first, r.second});
+    }
+    if (!m_Suggestions.empty())
+        m_iSelectedSuggestion = 0;
+}
+
+void CChat::DrawSuggestions()
+{
+    if (m_Suggestions.empty() || !m_bInputVisible) return;
+
+    CGraphics* pGfx = CGraphics::GetSingletonPtr();
+    float fLineH = GetFontHeight(m_vecScale.fY);
+    float fItemH = fLineH + 6.0f * m_vecScale.fY;
+    int iShow = std::min((int)m_Suggestions.size(), CHAT_MAX_SUGGESTIONS);
+    float fPad = 3.0f * m_vecScale.fY;
+    float fBoxH = iShow * fItemH + fPad * 2;
+    float fBoxX = m_fInputBoxX, fBoxW = m_fInputBoxW;
+    float fBoxY = m_fInputBoxY + m_fInputBoxH + 3.0f * m_vecScale.fY;
+
+    pGfx->DrawRectangle(fBoxX, fBoxY, fBoxW, fBoxH, COLOR_ARGB(m_SuggestionBgColor.A, m_SuggestionBgColor.R, m_SuggestionBgColor.G, m_SuggestionBgColor.B));
+
+    for (int i = 0; i < iShow; i++)
+    {
+        float fY = fBoxY + fPad + i * fItemH;
+        if (i == m_iSelectedSuggestion)
+            pGfx->DrawRectangle(fBoxX + 2, fY, fBoxW - 4, fItemH, COLOR_ARGB(40, 255, 255, 255));
+        if (i > 0)
+            pGfx->DrawRectangle(fBoxX + 8 * m_vecScale.fX, fY, fBoxW - 16 * m_vecScale.fX, 1, COLOR_ARGB(20, 255, 255, 255));
+
+        std::string strLine = "/" + std::string(m_Suggestions[i].strCommand);
+        if (!m_Suggestions[i].strDescription.empty())
+            strLine += "  -  " + std::string(m_Suggestions[i].strDescription);
+
+        float fTY = fY + (fItemH - fLineH) * 0.5f;
+        CRect2D rc(fBoxX + 10.0f * m_vecScale.fX, fTY, fBoxX + fBoxW, fTY + fLineH);
+        DrawTextString(strLine.c_str(), rc, 0, rc, DT_LEFT | DT_TOP | DT_NOCLIP,
+            COLOR_ARGB(m_SuggestionTextColor.A, m_SuggestionTextColor.R, m_SuggestionTextColor.G, m_SuggestionTextColor.B),
+            m_vecScale.fX, m_vecScale.fY, false, rc);
+    }
+}
+
+void CChat::DrawScrollbar()
+{
+    if (!m_bShowScrollbar && !m_bScrollbarAlways) return;
+    if (!m_bScrollbarAlways && !m_bInputVisible) return;
+
+    unsigned int uiTotal = 0;
+    unsigned int uiLine = m_uiMostRecentLine;
+    while (m_Lines[uiLine].IsActive())
+    {
+        uiTotal++;
+        uiLine = (uiLine + 1) % CHAT_MAX_LINES;
+        if (uiLine == m_uiMostRecentLine) break;
+    }
+    if (uiTotal <= m_uiNumLines) return;
+
+    CGraphics* pGfx = CGraphics::GetSingletonPtr();
+    float sw = 3.0f * m_vecScale.fX;
+    float fLineH = CChat::GetFontHeight(m_vecScale.fY);
+    float fBgBot = m_vecBackgroundPosition.fY + m_vecBackgroundSize.fY;
+    float fBot = fBgBot - 0.25f * fLineH;
+    float fTop = fBot - fLineH * (float)m_uiNumLines;
+    // Fixed screen-anchored X (doesn't move with chat offset_x)
+    float fX = 4.0f * m_vecScale.fX;
+    float tH = fBot - fTop;
+    if (tH <= 0) return;
+
+    float vr = (float)m_uiNumLines / (float)uiTotal;
+    float thumbH = std::max(16.0f * m_vecScale.fY, tH * vr);
+    if (thumbH > tH) thumbH = tH;
+    float sMax = (float)(uiTotal - m_uiNumLines);
+    float sRatio = (sMax > 0) ? (float)m_uiScrollOffset / sMax : 0;
+    float thumbY = std::max(fTop, std::min(fTop + (tH - thumbH) * (1.0f - sRatio), fBot - thumbH));
+
+    unsigned long ulThumb = COLOR_ARGB(m_ScrollThumbColor.A, m_ScrollThumbColor.R, m_ScrollThumbColor.G, m_ScrollThumbColor.B);
+    pGfx->DrawRectangle(fX, thumbY, sw, thumbH, ulThumb);
 }

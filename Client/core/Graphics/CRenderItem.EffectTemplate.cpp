@@ -31,18 +31,6 @@ CEffectTemplate* NewEffectTemplate(CRenderItemManager* pManager, const SString& 
     return pEffectTemplate;
 }
 
-static std::map<SString, SString> ms_ShaderIncludeResolveMap;
-
-void SetShaderIncludeResolveMap(const std::map<SString, SString>& fileMap)
-{
-    ms_ShaderIncludeResolveMap = fileMap;
-}
-
-void ClearShaderIncludeResolveMap()
-{
-    ms_ShaderIncludeResolveMap.clear();
-}
-
 namespace
 {
     ////////////////////////////////////////////////////////////////////////////////////
@@ -89,26 +77,6 @@ namespace
             // Load file
             std::vector<char> buffer;
             if (!FileLoad(strPathFilename, buffer) || buffer.empty())
-            {
-                // Try resolving via cache file map
-                SString strOrigName = pFileName;
-                strOrigName = strOrigName.Replace("\\", "/");
-                auto it = ms_ShaderIncludeResolveMap.find(strOrigName);
-                if (it == ms_ShaderIncludeResolveMap.end())
-                {
-                    SString strFileOnly = ExtractFilename(PathConform(pFileName));
-                    it = ms_ShaderIncludeResolveMap.find(strFileOnly);
-                }
-                if (it != ms_ShaderIncludeResolveMap.end())
-                {
-                    if (FileLoad(it->second, buffer) && !buffer.empty())
-                    {
-                        strPathFilename = it->second;
-                    }
-                }
-            }
-
-            if (buffer.empty())
             {
                 SString strMsg("[CIncludeManager: Can't find %s]", *strPathFilename);
                 m_strReport += strMsg;

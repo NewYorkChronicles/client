@@ -10,6 +10,7 @@
  *****************************************************************************/
 
 #include "StdInc.h"
+#include "CClientIntegrity.h"
 #include <game/CClock.h>
 #include <game/CFireManager.h>
 #include <game/CGarage.h>
@@ -5149,6 +5150,19 @@ void CPacketHandler::Packet_ResourceStart(NetBitStreamInterface& bitStream)
         bitStream.Read(iDownloadPriorityGroup);
     }
 
+    SString strNuiPath;
+    int     iNuiZ = 0;
+    bool    bNuiHidden = false;
+    if (bitStream.Can(eBitStreamVersion::NuiTag_AutoFrame))
+    {
+        bitStream.ReadString(strNuiPath);
+        bitStream.Read(iNuiZ);
+    }
+    if (bitStream.Can(eBitStreamVersion::NuiTag_AutoFrameHidden))
+    {
+        bitStream.ReadBit(bNuiHidden);
+    }
+
     // Get the resource entity
     CClientEntity* pResourceEntity = CElementIDs::GetElement(ResourceEntityID);
 
@@ -5169,6 +5183,9 @@ void CPacketHandler::Packet_ResourceStart(NetBitStreamInterface& bitStream)
     {
         pResource->SetRemainingNoClientCacheScripts(usNoClientCacheScriptCount);
         pResource->SetDownloadPriorityGroup(iDownloadPriorityGroup);
+        pResource->SetNuiPath(strNuiPath);
+        pResource->SetNuiZ(iNuiZ);
+        pResource->SetNuiHidden(bNuiHidden);
 
         // Resource Chunk Type (F = Resource File, E = Exported Function)
         unsigned char ucChunkType;
@@ -5344,6 +5361,7 @@ void CPacketHandler::Packet_ResourceStart(NetBitStreamInterface& bitStream)
 
     if (bFatalError)
     {
+        CClientIntegrity::CResourceStopScope guard;
         g_pClientGame->m_pResourceManager->Remove(pResource);
         RaiseFatalError(2081);
     }

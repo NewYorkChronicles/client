@@ -46,6 +46,8 @@ public:
     static bool SetPlayerHudComponentProperty(eHudComponent component, eHudComponentProperty property, std::variant<CVector2D, float, bool, std::string> value);
     static bool ResetPlayerHudComponentProperty(eHudComponent component, eHudComponentProperty property) noexcept;
 
+    LUA_DECLARE(GetVisiblePlayers);
+
     // Community funcs
     LUA_DECLARE(GetPlayerUserName);
     LUA_DECLARE(GetPlayerSerial);

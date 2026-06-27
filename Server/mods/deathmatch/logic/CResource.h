@@ -319,6 +319,10 @@ public:
 
     int GetDownloadPriorityGroup() const noexcept { return m_iDownloadPriorityGroup; }
 
+    const SString& GetNuiPath() const noexcept { return m_strNuiPath; }
+    int            GetNuiZ() const noexcept { return m_iNuiZ; }
+    bool           IsNuiHidden() const noexcept { return m_bNuiHidden; }
+
     void SetUsingDbConnectMysql(bool bUsingDbConnectMysql) { m_bUsingDbConnectMysql = bUsingDbConnectMysql; }
     bool IsUsingDbConnectMysql();
     bool IsFileDbConnectMysqlProtected(const SString& strFilename, bool bReadOnly);
@@ -385,6 +389,10 @@ private:
     unsigned int m_uiVersionState = 2;  // 2 = release
 
     int m_iDownloadPriorityGroup = 0;
+
+    SString m_strNuiPath;
+    int     m_iNuiZ = 0;
+    bool    m_bNuiHidden = false;
 
     time_t m_timeLoaded = 0;
     time_t m_timeStarted = 0;

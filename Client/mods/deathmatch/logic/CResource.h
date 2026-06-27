@@ -109,6 +109,12 @@ public:
     bool               IsWaitingForInitialDownloads();
     int                GetDownloadPriorityGroup() { return m_iDownloadPriorityGroup; }
     void               SetDownloadPriorityGroup(int iDownloadPriorityGroup) { m_iDownloadPriorityGroup = iDownloadPriorityGroup; }
+    const SString&     GetNuiPath() const noexcept { return m_strNuiPath; }
+    void               SetNuiPath(const SString& path) { m_strNuiPath = path; }
+    int                GetNuiZ() const noexcept { return m_iNuiZ; }
+    void               SetNuiZ(int z) { m_iNuiZ = z; }
+    bool               IsNuiHidden() const noexcept { return m_bNuiHidden; }
+    void               SetNuiHidden(bool h) { m_bNuiHidden = h; }
 
 private:
     unsigned short       m_usNetID;
@@ -134,6 +140,9 @@ private:
     CMtaVersion          m_strMinClientReq;
     bool                 m_bOOPEnabled;
     int                  m_iDownloadPriorityGroup;
+    SString              m_strNuiPath;
+    int                  m_iNuiZ = 0;
+    bool                 m_bNuiHidden = false;
 
     // To control cursor show/hide
     static int m_iShowingCursor;

@@ -54,7 +54,8 @@ if os.target() == "windows" then
 	
 		defines {
 			"LUA_USE_APICHECK",
-			"LUA_BUILD_AS_DLL"
+			"LUA_BUILD_AS_DLL",
+			"NYC_INTEGRITY_GATE"
 		}
 
         filter "platforms:not x86"

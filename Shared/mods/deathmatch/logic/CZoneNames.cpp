@@ -39,7 +39,7 @@ static const SZone _zoneInfoList[] = {
     {-456, -1003, -40, -135, -413, 230, "Belleville Park"},
     {-217, -411, 6, -95, -61, 172, "Liberty Campus"},
     {-217, -61, -11, 280, 268, 89, "Rockford"},
-    {-1967, -1344, -39, -803, -268, 260, "Francis International Airport"},
+    {-1967, -1344, -39, -803, -268, 260, "JFK International Airport"},
     {-1146, -268, -39, -706, 92, 260, "Wichita Gardens"},
     {-1202, 93, -44, -601, 650, 556, "Cedar Grove"},
     {-1742, -267, -43, -1147, 92, 256, "Pike Creek"},

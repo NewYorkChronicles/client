@@ -167,6 +167,7 @@ int CClient::ClientInitialize(const char* szArguments, CCoreInterface* pCore)
                     // g_pCore->GetConsole ()->Echo ( "Packetlogger is logging to log.rec" );
 
                     // Start the game
+                    g_pClientGame->SetAuthToken(arguments.authHex);
                     g_pClientGame->StartGame(arguments.nickname.c_str(), arguments.password.c_str());
                 }
                 else
@@ -292,6 +293,12 @@ void CClient::GetPlayerNames(std::vector<SString>& vPlayerNames)
     }
 }
 
+void CClient::GetCommandSuggestions(const char* szPrefix, std::vector<std::pair<SString, SString>>& outResults)
+{
+    if (g_pClientGame)
+        g_pClientGame->GetRegisteredCommands()->GetSuggestions(szPrefix, outResults);
+}
+
 void CClient::OnWindowFocusChange(bool state)
 {
     g_pClientGame->OnWindowFocusChange(state);
@@ -321,6 +328,8 @@ CClient::InitializeArguments CClient::ExtractInitializeArguments(const char* arg
                 if (size_t passwordDelimiter = view.find_first_of(' ', nicknameDelimiter); passwordDelimiter != std::string_view::npos)
                 {
                     result.password = view.substr(nicknameDelimiter, passwordDelimiter - nicknameDelimiter);
+                    if (size_t authBegin = view.find_first_not_of(' ', passwordDelimiter); authBegin != std::string_view::npos)
+                        result.authHex = view.substr(authBegin);
                 }
                 else
                 {

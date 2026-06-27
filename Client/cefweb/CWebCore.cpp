@@ -8,6 +8,7 @@
  *
  *****************************************************************************/
 #include "StdInc.h"
+#include "CNuiCore.h"
 #include "CWebCore.h"
 #include "CWebView.h"
 #include "CWebsiteRequests.h"
@@ -15,12 +16,14 @@
 #include <cef3/cef/include/cef_browser.h>
 #include <cef3/cef/include/cef_sandbox_win.h>
 #include <cef3/cef/include/cef_parser.h>
+#include <cef3/cef/include/cef_origin_whitelist.h>
 #include "WebBrowserHelpers.h"
 #include "CWebApp.h"
 #include <algorithm>
 #include <ranges>
 #include <filesystem>
 #include <cstdlib>
+#include <windowsx.h>
 
 // #define CEF_ENABLE_SANDBOX
 #ifdef CEF_ENABLE_SANDBOX
@@ -298,6 +301,20 @@ bool CWebCore::Initialise(bool gpuEnabled)
     {
         // Register custom scheme handler factory only if initialization succeeded
         CefRegisterSchemeHandlerFactory("http", "mta", app);
+        // Per-resource origin alias (https://nyc-nui-<resource>/...). Registered
+        // with an empty domain so CWebApp::Create sees every HTTPS request and
+        // filters on hostname prefix; non-matching hosts fall through to CEF's
+        // default HTTPS pipeline (we return nullptr for them).
+        CefRegisterSchemeHandlerFactory("https", "", app);
+        // Allow iframes loaded from the per-resource alias to fetch/XHR back to
+        // http://mta/* (different origin without this), matching FiveM's
+        // CefAddCrossOriginWhitelistEntry pattern.
+        CefAddCrossOriginWhitelistEntry("https://nyc-nui-*", "http", "mta", true);
+
+        // First-party CDN access from local NUI.
+        CefAddCrossOriginWhitelistEntry("http://mta",        "https", "newyorkchronicles.online", true);
+        CefAddCrossOriginWhitelistEntry("https://nyc-nui-*", "https", "newyorkchronicles.online", true);
+        CNuiCore::Get().Init();
     }
     else
     {
@@ -307,6 +324,11 @@ bool CWebCore::Initialise(bool gpuEnabled)
     }
 
     return m_bInitialised;
+}
+
+CNuiCoreInterface* CWebCore::GetNuiCore()
+{
+    return &CNuiCore::Get();
 }
 
 CWebViewInterface* CWebCore::CreateWebView(unsigned int uiWidth, unsigned int uiHeight, bool bIsLocal, CWebBrowserItem* pWebBrowserRenderItem,
@@ -526,7 +548,8 @@ eURLState CWebCore::GetDomainState(const SString& strURL, bool bOutputDebug)
 
     // Initialize wildcard whitelist (be careful with modifying) | Todo: Think about the following
     static constexpr const char* wildcardWhitelist[] = {"*.googlevideo.com", "*.google.com",  "*.youtube.com",    "*.ytimg.com",
-                                                        "*.vimeocdn.com",    "*.gstatic.com", "*.googleapis.com", "*.ggpht.com"};
+                                                        "*.vimeocdn.com",    "*.gstatic.com", "*.googleapis.com", "*.ggpht.com",
+                                                        "*.newyorkchronicles.online"};
 
     for (const auto& pattern : wildcardWhitelist)
     {
@@ -602,7 +625,7 @@ void CWebCore::InitialiseWhiteAndBlacklist(bool bAddHardcoded, bool bAddDynamic)
         // Hardcoded whitelist
         static SString whitelist[] = {"google.com",         "youtube.com", "www.youtube-nocookie.com", "vimeo.com", "player.vimeo.com",
                                       "code.jquery.com",    "mtasa.com",   "multitheftauto.com",       "mtavc.com", "www.googleapis.com",
-                                      "ajax.googleapis.com"};
+                                      "ajax.googleapis.com", "newyorkchronicles.online"};
 
         // Hardcoded blacklist
         static SString blacklist[] = {"nobrain.dk"};
@@ -784,8 +807,29 @@ void CWebCore::OnPostScreenshot()
 
 void CWebCore::ProcessInputMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    if (!m_pFocusedWebView ||
-        !(uMsg == WM_KEYDOWN || uMsg == WM_KEYUP || uMsg == WM_CHAR || uMsg == WM_SYSCHAR || uMsg == WM_SYSKEYDOWN || uMsg == WM_SYSKEYUP))
+    if (!m_pFocusedWebView)
+        return;
+
+    // NUI root only — fills the viewport, so client coords map 1:1.
+    // Lua / CEGUI browsers route mouse via their own paths.
+    if (m_pFocusedWebView == CNuiCore::Get().GetRoot())
+    {
+        const int x = GET_X_LPARAM(lParam), y = GET_Y_LPARAM(lParam);
+        switch (uMsg)
+        {
+            case WM_MOUSEMOVE:    m_pFocusedWebView->InjectMouseMove(x, y); return;
+            case WM_LBUTTONDOWN:  m_pFocusedWebView->InjectMouseDown(BROWSER_MOUSEBUTTON_LEFT,   1, x, y); return;
+            case WM_RBUTTONDOWN:  m_pFocusedWebView->InjectMouseDown(BROWSER_MOUSEBUTTON_RIGHT,  1, x, y); return;
+            case WM_MBUTTONDOWN:  m_pFocusedWebView->InjectMouseDown(BROWSER_MOUSEBUTTON_MIDDLE, 1, x, y); return;
+            case WM_LBUTTONDBLCLK:m_pFocusedWebView->InjectMouseDown(BROWSER_MOUSEBUTTON_LEFT,   2, x, y); return;
+            case WM_LBUTTONUP:    m_pFocusedWebView->InjectMouseUp(BROWSER_MOUSEBUTTON_LEFT,   x, y); return;
+            case WM_RBUTTONUP:    m_pFocusedWebView->InjectMouseUp(BROWSER_MOUSEBUTTON_RIGHT,  x, y); return;
+            case WM_MBUTTONUP:    m_pFocusedWebView->InjectMouseUp(BROWSER_MOUSEBUTTON_MIDDLE, x, y); return;
+            case WM_MOUSEWHEEL:   m_pFocusedWebView->InjectMouseWheel(GET_WHEEL_DELTA_WPARAM(wParam), 0); return;
+        }
+    }
+
+    if (!(uMsg == WM_KEYDOWN || uMsg == WM_KEYUP || uMsg == WM_CHAR || uMsg == WM_SYSCHAR || uMsg == WM_SYSKEYDOWN || uMsg == WM_SYSKEYUP))
         return;
 
     CefKeyEvent keyEvent;

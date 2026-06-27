@@ -168,8 +168,11 @@ LRESULT CALLBACK CMessageLoopHook::ProcessMessage(HWND hwnd, UINT uMsg, WPARAM w
     }
 
     // Prevent GTA from knowing about kill focuses. Prevents pausing.
+    // Hint working set sizes (soft limits) so Windows doesn't aggressively trim on alt-tab,
+    // but keep both bounds soft so the process can still grow past 1.5GB when streaming demands it.
     if (uMsg == WM_KILLFOCUS || (uMsg == WM_ACTIVATE && LOWORD(wParam) == WA_INACTIVE))
     {
+        SetProcessWorkingSetSizeEx(GetCurrentProcess(), 200 * 1024 * 1024, 1500 * 1024 * 1024, 0);
         return true;
     }
 
@@ -411,18 +414,85 @@ LRESULT CALLBACK CMessageLoopHook::ProcessMessage(HWND hwnd, UINT uMsg, WPARAM w
                     {
                         if (uMsg == WM_KEYDOWN)
                         {
-                            if (wParam == VK_DOWN)
-                            {
-                                CLocalGUI::GetSingleton().GetChat()->SetPreviousHistoryText();
-                            }
+                            CChat* pChat = CLocalGUI::GetSingleton().GetChat();
+                            bool bShift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+                            bool bCtrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
 
-                            if (wParam == VK_UP)
+                            if (wParam == VK_DOWN)
+                                pChat->SetPreviousHistoryText();
+                            else if (wParam == VK_UP)
+                                pChat->SetNextHistoryText();
+                            else if (wParam == VK_LEFT)
                             {
-                                CLocalGUI::GetSingleton().GetChat()->SetNextHistoryText();
+                                if (bShift)
+                                {
+                                    if (pChat->m_iSelStart < 0) pChat->m_iSelStart = pChat->m_iCursorPos;
+                                    if (bCtrl)
+                                    { while (pChat->m_iCursorPos > 0 && pChat->m_strInputText[pChat->Utf8PrevChar(pChat->m_iCursorPos)] == ' ') pChat->m_iCursorPos = pChat->Utf8PrevChar(pChat->m_iCursorPos);
+                                      while (pChat->m_iCursorPos > 0 && pChat->m_strInputText[pChat->Utf8PrevChar(pChat->m_iCursorPos)] != ' ') pChat->m_iCursorPos = pChat->Utf8PrevChar(pChat->m_iCursorPos); }
+                                    else pChat->m_iCursorPos = pChat->Utf8PrevChar(pChat->m_iCursorPos);
+                                }
+                                else if (pChat->HasSelection())
+                                { pChat->m_iCursorPos = std::min(pChat->m_iSelStart, pChat->m_iCursorPos); pChat->m_iSelStart = -1; }
+                                else
+                                {
+                                    pChat->m_iSelStart = -1;
+                                    if (bCtrl)
+                                    { while (pChat->m_iCursorPos > 0 && pChat->m_strInputText[pChat->Utf8PrevChar(pChat->m_iCursorPos)] == ' ') pChat->m_iCursorPos = pChat->Utf8PrevChar(pChat->m_iCursorPos);
+                                      while (pChat->m_iCursorPos > 0 && pChat->m_strInputText[pChat->Utf8PrevChar(pChat->m_iCursorPos)] != ' ') pChat->m_iCursorPos = pChat->Utf8PrevChar(pChat->m_iCursorPos); }
+                                    else pChat->m_iCursorPos = pChat->Utf8PrevChar(pChat->m_iCursorPos);
+                                }
+                            }
+                            else if (wParam == VK_RIGHT)
+                            {
+                                int len = (int)pChat->m_strInputText.size();
+                                if (bShift)
+                                {
+                                    if (pChat->m_iSelStart < 0) pChat->m_iSelStart = pChat->m_iCursorPos;
+                                    if (bCtrl)
+                                    { while (pChat->m_iCursorPos < len && pChat->m_strInputText[pChat->m_iCursorPos] != ' ') pChat->m_iCursorPos = pChat->Utf8NextChar(pChat->m_iCursorPos);
+                                      while (pChat->m_iCursorPos < len && pChat->m_strInputText[pChat->m_iCursorPos] == ' ') pChat->m_iCursorPos = pChat->Utf8NextChar(pChat->m_iCursorPos); }
+                                    else pChat->m_iCursorPos = pChat->Utf8NextChar(pChat->m_iCursorPos);
+                                }
+                                else if (pChat->HasSelection())
+                                { pChat->m_iCursorPos = std::max(pChat->m_iSelStart, pChat->m_iCursorPos); pChat->m_iSelStart = -1; }
+                                else
+                                {
+                                    pChat->m_iSelStart = -1;
+                                    if (bCtrl)
+                                    { while (pChat->m_iCursorPos < len && pChat->m_strInputText[pChat->m_iCursorPos] != ' ') pChat->m_iCursorPos = pChat->Utf8NextChar(pChat->m_iCursorPos);
+                                      while (pChat->m_iCursorPos < len && pChat->m_strInputText[pChat->m_iCursorPos] == ' ') pChat->m_iCursorPos = pChat->Utf8NextChar(pChat->m_iCursorPos); }
+                                    else pChat->m_iCursorPos = pChat->Utf8NextChar(pChat->m_iCursorPos);
+                                }
+                            }
+                            else if (wParam == VK_HOME)
+                            {
+                                if (bShift && pChat->m_iSelStart < 0) pChat->m_iSelStart = pChat->m_iCursorPos;
+                                else if (!bShift) pChat->m_iSelStart = -1;
+                                pChat->m_iCursorPos = 0;
+                            }
+                            else if (wParam == VK_END)
+                            {
+                                if (bShift && pChat->m_iSelStart < 0) pChat->m_iSelStart = pChat->m_iCursorPos;
+                                else if (!bShift) pChat->m_iSelStart = -1;
+                                pChat->m_iCursorPos = (int)pChat->m_strInputText.size();
+                            }
+                            else if (wParam == VK_DELETE)
+                            {
+                                if (pChat->HasSelection())
+                                    pChat->DeleteSelection();
+                                else if (pChat->m_iCursorPos < (int)pChat->m_strInputText.size())
+                                {
+                                    int next = pChat->Utf8NextChar(pChat->m_iCursorPos);
+                                    pChat->m_strInputText.erase(pChat->m_iCursorPos, next - pChat->m_iCursorPos);
+                                    pChat->SetInputText(pChat->m_strInputText.c_str());
+                                }
+                                pChat->m_iSelStart = -1;
                             }
                         }
                     }
-                    else if (uMsg == WM_KEYDOWN && CLocalGUI::GetSingleton().GetMainMenu()->GetServerBrowser()->IsAddressBarAwaitingInput())
+
+                    if (uMsg == WM_KEYDOWN && CLocalGUI::GetSingleton().GetMainMenu()->GetServerBrowser()->IsAddressBarAwaitingInput())
                     {
                         if (wParam == VK_DOWN)
                         {

@@ -1,14 +1,3 @@
-/*****************************************************************************
- *
- *  PROJECT:     Multi Theft Auto v1.0
- *  LICENSE:     See LICENSE in the top level directory
- *  FILE:        core/CChat.h
- *  PURPOSE:     Header file for the chatbox class
- *
- *  Multi Theft Auto is available from https://www.multitheftauto.com/
- *
- *****************************************************************************/
-
 #pragma once
 
 #include "CGUI.h"
@@ -16,42 +5,23 @@
 
 class CChatLineSection;
 
-#define CHAT_WIDTH                320                    // Chatbox default width
-#define CHAT_TEXT_COLOR           CColor(235, 221, 178)  // Chatbox default text color
-#define CHAT_MAX_LINES            100                    // Chatbox maximum chat lines
-#define CHAT_BUFFER               1024                   // Chatbox buffer size
-#define CHAT_INPUT_HISTORY_LENGTH 128                    // Chatbox input history length
+#define CHAT_WIDTH                320
+#define CHAT_TEXT_COLOR           CColor(235, 221, 178)
+#define CHAT_MAX_LINES            100
+#define CHAT_BUFFER               1024
+#define CHAT_INPUT_HISTORY_LENGTH 128
+#define CHAT_MAX_SUGGESTIONS      8
 
 class CColor
 {
 public:
     CColor() { R = G = B = A = 255; }
-    CColor(unsigned char _R, unsigned char _G, unsigned char _B, unsigned char _A = 255)
-    {
-        R = _R;
-        G = _G;
-        B = _B;
-        A = _A;
-    }
+    CColor(unsigned char _R, unsigned char _G, unsigned char _B, unsigned char _A = 255) { R = _R; G = _G; B = _B; A = _A; }
     CColor(const CColor& other) { *this = other; }
     CColor(unsigned long ulColor) { *this = ulColor; }
-    CColor& operator=(const CColor& color)
-    {
-        R = color.R;
-        G = color.G;
-        B = color.B;
-        A = color.A;
-        return *this;
-    }
-    CColor& operator=(unsigned long ulColor)
-    {
-        R = (ulColor >> 16) & 0xFF;
-        G = (ulColor >> 8) & 0xFF;
-        B = (ulColor) & 0xFF;
-        return *this;
-    }
+    CColor& operator=(const CColor& color) { R = color.R; G = color.G; B = color.B; A = color.A; return *this; }
+    CColor& operator=(unsigned long ulColor) { R = (ulColor >> 16) & 0xFF; G = (ulColor >> 8) & 0xFF; B = (ulColor) & 0xFF; return *this; }
     bool operator==(const CColor& other) const { return R == other.R && G == other.G && B == other.B && A == other.A; }
-
     unsigned char R, G, B, A;
 };
 
@@ -59,10 +29,8 @@ class CChatLineSection
 {
 public:
     friend class CChatLine;
-
     CChatLineSection();
     CChatLineSection(const CChatLineSection& other);
-
     CChatLineSection& operator=(const CChatLineSection& other);
 
     void        Draw(const CVector2D& vecPosition, unsigned char ucAlpha, bool bShadow, bool bOutline, const CRect2D& RenderBounds);
@@ -83,15 +51,13 @@ class CChatLine
 {
 public:
     CChatLine();
-
     virtual const char* Format(const char* szText, float fWidth, CColor& color, bool bColorCoded);
     virtual void        Draw(const CVector2D& vecPosition, unsigned char ucAlpha, bool bShadow, bool bOutline, const CRect2D& RenderBounds);
     virtual float       GetWidth();
     bool                IsActive() { return m_bActive; }
     void                SetActive(bool bActive) { m_bActive = bActive; }
-
-    unsigned long GetCreationTime() { return m_ulCreationTime; }
-    void          UpdateCreationTime();
+    unsigned long       GetCreationTime() { return m_ulCreationTime; }
+    void                UpdateCreationTime();
 
 protected:
     bool                          m_bActive;
@@ -104,46 +70,41 @@ class CChatInputLine : public CChatLine
 public:
     void Draw(CVector2D& vecPosition, unsigned char ucAlpha, bool bShadow, bool bOutline);
     void Clear();
-
     CChatLineSection       m_Prefix;
     std::vector<CChatLine> m_ExtraLines;
 };
 
-//
-// SDrawListLineItem
-//
 struct SDrawListLineItem
 {
     uint      uiLine;
     CVector2D vecPosition;
     uchar     ucAlpha;
-
     bool operator!=(const SDrawListLineItem& other) const { return !operator==(other); }
     bool operator==(const SDrawListLineItem& other) const { return uiLine == other.uiLine && vecPosition == other.vecPosition && ucAlpha == other.ucAlpha; }
 };
 
-//
-// SDrawList - Used to store a snapshot of what the chatbox is currently rendering
-//
 struct SDrawList
 {
     CRect2D                        renderBounds;
     bool                           bShadow;
     bool                           bOutline;
     std::vector<SDrawListLineItem> lineItemList;
-
     bool operator!=(const SDrawList& other) const { return !operator==(other); }
     bool operator==(const SDrawList& other) const
     {
         if (lineItemList.size() != other.lineItemList.size() || bShadow != other.bShadow || bOutline != other.bOutline || renderBounds != other.renderBounds)
             return false;
-
         for (uint i = 0; i < lineItemList.size(); i++)
             if (lineItemList[i] != other.lineItemList[i])
                 return false;
-
         return true;
     }
+};
+
+struct SChatSuggestion
+{
+    SString strCommand;
+    SString strDescription;
 };
 
 class CChat
@@ -151,6 +112,7 @@ class CChat
     friend class CChatLine;
     friend class CChatInputLine;
     friend class CChatLineSection;
+    friend class CMessageLoopHook;
 
 public:
     CChat() {};
@@ -209,6 +171,18 @@ public:
 
     float GetChatBottomPosition() const noexcept;
 
+    void UpdateSuggestions();
+    void DrawSuggestions();
+    void DrawScrollbar();
+    void DrawTimestamp(const CVector2D& vecPosition, unsigned char ucAlpha);
+
+    int  Utf8PrevChar(int pos);
+    int  Utf8NextChar(int pos);
+    void DeleteSelection();
+    bool HasSelection() const { return m_iSelStart >= 0 && m_iSelStart != m_iCursorPos; }
+    void CopySelection();
+    void PasteClipboard();
+
 private:
     void LoadCVars();
 
@@ -221,8 +195,8 @@ protected:
     void GetDrawList(SDrawList& outDrawList, bool bUsingOutline);
     void DrawInputLine(bool bUsingOutline);
 
-    CChatLine      m_Lines[CHAT_MAX_LINES];  // Circular buffer
-    int            m_iScrollState;           // 1 up, 0 stop, -1 down
+    CChatLine      m_Lines[CHAT_MAX_LINES];
+    int            m_iScrollState;
     unsigned int   m_uiMostRecentLine;
     unsigned int   m_uiScrollOffset;
     float          m_fSmoothScroll;
@@ -257,7 +231,6 @@ protected:
     std::string m_strInputText;
     std::string m_strCommand;
 
-    // Contains a saved copy of initial input text when navigating history entries
     std::string m_strSavedInputText;
 
     CEntryHistory* m_pInputHistory = new CEntryHistory(CHAT_INPUT_HISTORY_LENGTH);
@@ -266,8 +239,8 @@ protected:
     bool  m_bVisible;
     bool  m_bInputBlocked;
     bool  m_bInputVisible;
-    int   m_iScrollingBack;          // Non zero if currently scrolling back
-    float m_fCssStyleOverrideAlpha;  // For fading out 'CssStyle' effect. (When entering text or scrolling back)
+    int   m_iScrollingBack;
+    float m_fCssStyleOverrideAlpha;
     float m_fBackgroundAlpha;
     float m_fInputBackgroundAlpha;
 
@@ -303,4 +276,23 @@ protected:
     static inline constexpr int m_iDefaultCharacterLimit = 96;
     static inline constexpr int m_iMaxCharacterLimit = 255;
     static inline constexpr int m_iMaxInputLines = 5;
+
+    bool  m_bTimestamps;
+    bool  m_bShowSuggestions;
+    bool  m_bShowScrollbar;
+    bool  m_bScrollbarAlways;
+    CColor m_InputBorderColor;
+    CColor m_InputBoxColor;
+    CColor m_SuggestionBgColor;
+    CColor m_SuggestionTextColor;
+    CColor m_ScrollTrackColor;
+    CColor m_ScrollThumbColor;
+    CColor m_CaretColor;
+    int   m_iCursorPos;
+    int   m_iSelStart;
+    float m_fInputScrollX;
+    DWORD m_dwCursorBlink;
+    float m_fInputBoxX, m_fInputBoxY, m_fInputBoxW, m_fInputBoxH;
+    std::vector<SChatSuggestion> m_Suggestions;
+    int                          m_iSelectedSuggestion;
 };

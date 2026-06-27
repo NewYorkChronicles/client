@@ -129,6 +129,7 @@ public:
     virtual void        SetCurrentServerCursorAlpha(float fAlpha) = 0;
     virtual float       GetCurrentServerCursorAlpha() = 0;
     virtual eCursorType GetCursorType() = 0;
+    virtual void        SetCursorImage(const char* imageset, const char* image) = 0;
 
     virtual CVector2D GetResolution() = 0;
     virtual void      SetResolution(float fWidth, float fHeight) = 0;

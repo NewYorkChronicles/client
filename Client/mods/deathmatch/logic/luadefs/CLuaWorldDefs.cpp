@@ -144,6 +144,7 @@ void CLuaWorldDefs::LoadFunctions()
         {"areTrafficLightsLocked", AreTrafficLightsLocked},
         {"isPedTargetingMarkerEnabled", IsPedTargetingMarkerEnabled},
         {"isLineOfSightClear", IsLineOfSightClear},
+        {"isLineOfSightClearBatch", IsLineOfSightClearBatch},
         {"isWorldSpecialPropertyEnabled", ArgumentParserWarn<false, IsWorldSpecialPropertyEnabled>},
         {"isGarageOpen", IsGarageOpen},
         {"isTimeFrozen", ArgumentParser<IsTimeFrozen>},
@@ -492,6 +493,77 @@ int CLuaWorldDefs::GetWorldFromScreenPosition(lua_State* luaVM)
         m_pScriptDebugging->LogCustom(luaVM, argStream.GetFullErrorMessage());
 
     lua_pushboolean(luaVM, false);
+    return 1;
+}
+
+int CLuaWorldDefs::IsLineOfSightClearBatch(lua_State* luaVM)
+{
+    //  table isLineOfSightClearBatch ( table rays [, bool checkBuildings=true, bool checkVehicles=true, bool checkPeds=true,
+    //      bool checkObjects=true, bool checkDummies=true, bool seeThroughStuff=false, bool ignoreSomeObjectsForCamera=false ] )
+    //  rays = { {startX,startY,startZ, endX,endY,endZ}, ... }
+    //  Returns: { bool, bool, ... }
+    SLineOfSightFlags flags;
+
+    CScriptArgReader argStream(luaVM);
+
+    if (!argStream.NextIsTable())
+    {
+        m_pScriptDebugging->LogCustom(luaVM, "Bad argument @ 'isLineOfSightClearBatch' [Expected table at argument 1]");
+        lua_pushboolean(luaVM, false);
+        return 1;
+    }
+
+    lua_pushvalue(luaVM, 1);
+    int iTableRef = 1;
+    int iCount = static_cast<int>(lua_objlen(luaVM, iTableRef));
+    lua_pop(luaVM, 1);
+
+    argStream.Skip(1);
+    argStream.ReadBool(flags.bCheckBuildings, true);
+    argStream.ReadBool(flags.bCheckVehicles, true);
+    argStream.ReadBool(flags.bCheckPeds, true);
+    argStream.ReadBool(flags.bCheckObjects, true);
+    argStream.ReadBool(flags.bCheckDummies, true);
+    argStream.ReadBool(flags.bSeeThroughStuff, false);
+    argStream.ReadBool(flags.bIgnoreSomeObjectsForCamera, false);
+
+    if (argStream.HasErrors())
+    {
+        m_pScriptDebugging->LogCustom(luaVM, argStream.GetFullErrorMessage());
+        lua_pushboolean(luaVM, false);
+        return 1;
+    }
+
+    lua_newtable(luaVM);
+
+    for (int i = 1; i <= iCount; i++)
+    {
+        lua_rawgeti(luaVM, 1, i);
+        if (lua_istable(luaVM, -1))
+        {
+            CVector vecStart, vecEnd;
+
+            lua_rawgeti(luaVM, -1, 1); vecStart.fX = static_cast<float>(lua_tonumber(luaVM, -1)); lua_pop(luaVM, 1);
+            lua_rawgeti(luaVM, -1, 2); vecStart.fY = static_cast<float>(lua_tonumber(luaVM, -1)); lua_pop(luaVM, 1);
+            lua_rawgeti(luaVM, -1, 3); vecStart.fZ = static_cast<float>(lua_tonumber(luaVM, -1)); lua_pop(luaVM, 1);
+            lua_rawgeti(luaVM, -1, 4); vecEnd.fX = static_cast<float>(lua_tonumber(luaVM, -1)); lua_pop(luaVM, 1);
+            lua_rawgeti(luaVM, -1, 5); vecEnd.fY = static_cast<float>(lua_tonumber(luaVM, -1)); lua_pop(luaVM, 1);
+            lua_rawgeti(luaVM, -1, 6); vecEnd.fZ = static_cast<float>(lua_tonumber(luaVM, -1)); lua_pop(luaVM, 1);
+
+            bool bIsClear = false;
+            CStaticFunctionDefinitions::IsLineOfSightClear(vecStart, vecEnd, bIsClear, flags, NULL);
+
+            lua_pushboolean(luaVM, bIsClear);
+            lua_rawseti(luaVM, -3, i);
+        }
+        else
+        {
+            lua_pushboolean(luaVM, false);
+            lua_rawseti(luaVM, -3, i);
+        }
+        lua_pop(luaVM, 1);
+    }
+
     return 1;
 }
 

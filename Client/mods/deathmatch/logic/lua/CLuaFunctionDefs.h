@@ -70,6 +70,7 @@ public:
     LUA_DECLARE(IsCursorShowing);
     LUA_DECLARE(GetCursorAlpha);
     LUA_DECLARE(SetCursorAlpha);
+    LUA_DECLARE(SetCursorState);
 
     LUA_DECLARE(ShowCursor);
 

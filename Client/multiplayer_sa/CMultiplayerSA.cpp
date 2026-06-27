@@ -25,7 +25,6 @@ extern CMultiplayerSA* pMultiplayer;
 void ProcessDeferredStreamingMemoryRelief();
 void ProcessStreamingBufferUpgrade();
 void ProcessProactiveStreamingCleanup();
-void ProcessStreamingMemoryAutoScale();
 void EnforceDrawDistances();
 using namespace std;
 
@@ -52,6 +51,8 @@ extern CGame* pGameInterface;
 #define HOOKPOS_CWorld_ProcessVerticalLineSectorList     0x563357
 #define HOOKPOS_ComputeDamageResponse_StartChoking       0x4C05B9
 #define HOOKPOS_CAutomobile__ProcessSwingingDoor         0x6A9DAF
+#define HOOKPOS_CAutomobile__SteerInputDecay             0x6AD90C
+#define HOOKSIZE_CAutomobile__SteerInputDecay            5
 
 #define FUNC_CStreaming_Update                     0x40E670
 #define FUNC_CAudioEngine__DisplayRadioStationName 0x507030
@@ -369,6 +370,25 @@ float fWaterColorG = 0.0F;
 float fWaterColorB = 0.0F;
 float fWaterColorA = 0.0F;
 
+extern BYTE gpPathStreamFlags[64];
+extern int  gpPathNodeStorage[10000];
+void        GPS_Render();
+int         GPS_SetWaypoint(float fX, float fY, float fZ, DWORD dwColor, float fWidth);
+bool        GPS_ClearWaypoint(int waypointId);
+void        GPS_Clear();
+bool        GPS_IsActive();
+float       GPS_GetDistance();
+float       GPS_GetWaypointDistance(int waypointId);
+int         GPS_GetPathNodes(CVector* outNodes, int maxNodes);
+
+// https://github.com/ThirteenAG/WidescreenFixesPack
+// https://github.com/ThirteenAG/WidescreenFixesPack (RadarWidthScale=0.82)
+static float fRadarW = 0.0015625f * 0.82f;
+static float fRadarH = 0.002232143f;
+
+static float fRadarSquareMask = 1.0e-6f;
+static bool  bRadarWPatched = false;
+
 CStatsData  localStatsData;
 bool        bLocalStatsStatic = true;
 extern bool bWeaponFire;
@@ -448,6 +468,7 @@ void HOOK_CPed_IsPlayer();
 void HOOK_CTrain_ProcessControl_Derail();
 void HOOK_CVehicle_SetupRender();
 void HOOK_CVehicle_ResetAfterRender();
+void HOOK_CAutomobile__SteerInputDecay();
 void HOOK_CObject_Render();
 void HOOK_EndWorldColors();
 void HOOK_CWorld_ProcessVerticalLineSectorList();
@@ -615,6 +636,31 @@ CMultiplayerSA::CMultiplayerSA()
     m_dwLastStaticAnimID = eAnimID::ANIM_ID_WALK;
 }
 
+// Clamps radar points to a unit-square edge (replaces SA's circular clip)
+static double __cdecl LimitRadarPointSquare(float* xy)
+{
+    const double kSqrt2 = 1.4142135623730951;
+    const double kRad2Deg = 57.29577951308232;
+    const double kDeg2Rad = 1.0 / kRad2Deg;
+
+    double mag = std::sqrt((double)xy[0] * xy[0] + (double)xy[1] * xy[1]);
+    if (mag <= 1.0)
+        return mag;
+    if (xy[0] > -1.0f && xy[0] < 1.0f && xy[1] > -1.0f && xy[1] < 1.0f)
+        return 0.99;
+
+    double deg = std::atan2((double)xy[1], (double)xy[0]) * kRad2Deg;
+    if (deg > 45.0 && deg <= 135.0)
+        xy[0] = (float)(std::cos(deg * kDeg2Rad) * kSqrt2), xy[1] = 1.0f;
+    else if (deg > -135.0 && deg <= -45.0)
+        xy[0] = (float)(std::cos(deg * kDeg2Rad) * kSqrt2), xy[1] = -1.0f;
+    else if (deg > 135.0 || deg <= -135.0)
+        xy[0] = -1.0f, xy[1] = (float)(std::sin(deg * kDeg2Rad) * kSqrt2);
+    else
+        xy[0] = 1.0f, xy[1] = (float)(std::sin(deg * kDeg2Rad) * kSqrt2);
+    return mag;
+}
+
 void CMultiplayerSA::InitHooks()
 {
     InitKeysyncHooks();
@@ -649,6 +695,20 @@ void CMultiplayerSA::InitHooks()
     HookInstall(HOOKPOS_CCustomRoadsignMgr__RenderRoadsignAtomic, (DWORD)HOOK_CCustomRoadsignMgr__RenderRoadsignAtomic, 6);
     HookInstall(HOOKPOS_Trailer_BreakTowLink, (DWORD)HOOK_Trailer_BreakTowLink, 6);
     HookInstall(HOOKPOS_CRadar__DrawRadarGangOverlay, (DWORD)HOOK_CRadar__DrawRadarGangOverlay, 6);
+
+    // https://github.com/juicermv/GTA-GPS-Redux
+    memset(gpPathStreamFlags, 1, sizeof(gpPathStreamFlags));
+    memset(gpPathNodeStorage, -1, sizeof(gpPathNodeStorage));
+    MemPut<DWORD>(0x450CC2, (DWORD)gpPathStreamFlags);
+    MemPut<DWORD>(0x450CA8, (DWORD)gpPathStreamFlags);
+    MemPut<DWORD>(0x450D03, (DWORD)gpPathStreamFlags);
+    MemPut<DWORD>(0x450D14, (DWORD)gpPathStreamFlags);
+    MemPut<DWORD>(0x451782, (DWORD)gpPathNodeStorage);
+    MemPut<DWORD>(0x451904, (DWORD)gpPathNodeStorage);
+    MemPut<DWORD>(0x451AC3, (DWORD)gpPathNodeStorage);
+    MemPut<DWORD>(0x451B33, (DWORD)gpPathNodeStorage);
+    MemPut<DWORD>(0x4518F8, 10000);
+    MemPut<DWORD>(0x4519B0, 9950);
     HookInstall(HOOKPOS_CTaskComplexJump__CreateSubTask, (DWORD)HOOK_CTaskComplexJump__CreateSubTask, 6);
     HookInstall(HOOKPOS_FxManager_CreateFxSystem, (DWORD)HOOK_FxManager_CreateFxSystem, 8);
     HookInstall(HOOKPOS_FxManager_DestroyFxSystem, (DWORD)HOOK_FxManager_DestroyFxSystem, 7);
@@ -656,6 +716,7 @@ void CMultiplayerSA::InitHooks()
     HookInstall(HOOKPOS_CTaskSimplePlayerOnFoot_ProcessPlayerWeapon, (DWORD)HOOK_CTaskSimplePlayerOnFoot_ProcessPlayerWeapon, 7);
     HookInstall(HOOKPOS_CPed_IsPlayer, (DWORD)HOOK_CPed_IsPlayer, 6);
     HookInstall(HOOKPOS_CTrain_ProcessControl_Derail, (DWORD)HOOK_CTrain_ProcessControl_Derail, 6);
+    HookInstall(HOOKPOS_CAutomobile__SteerInputDecay, (DWORD)HOOK_CAutomobile__SteerInputDecay, HOOKSIZE_CAutomobile__SteerInputDecay);
     HookInstall(HOOKPOS_CVehicle_SetupRender, (DWORD)HOOK_CVehicle_SetupRender, 5);
     HookInstall(HOOKPOS_CVehicle_ResetAfterRender, (DWORD)HOOK_CVehicle_ResetAfterRender, 5);
     HookInstall(HOOKPOS_CObject_Render, (DWORD)HOOK_CObject_Render, 5);
@@ -982,6 +1043,11 @@ void CMultiplayerSA::InitHooks()
     // Prevent gta stopping driveby players from falling off
     MemSet((LPVOID)0x6B5B17, 0x90, 6);
 
+    // Fix wheel steer angle snap-back when vehicle is driverless / parked (CAutomobile::ProcessAI)
+    // The in-driving counterpart lives in HOOK_CAutomobile__SteerInputDecay.
+    MemSet((LPVOID)0x6B5579, 0x90, 6);
+    MemSet((LPVOID)0x6B568A, 0x90, 6);
+
     // Increase VehicleStruct pool size
     MemPut<BYTE>(0x5B8342 + 0, 0x33);  // xor eax, eax
     MemPut<BYTE>(0x5B8342 + 1, 0xC0);
@@ -1099,6 +1165,90 @@ void CMultiplayerSA::InitHooks()
 
     // ZONE
     MemPut<BYTE>(0x58AE52, 0x3C);
+
+    // Radar blip sprite size (default 8.0 at 0x859000)
+    MemPut<float>(0x859000, 6.5f);
+
+    // Radar screen position + height (CRadar::TransformRadarPointToScreenSpace)
+    MemPut<float>(0x858A10, 12.0f);    // X offset from left (default 40)
+    MemPut<float>(0x866B70, 96.0f);    // Y offset from bottom, radar top (default 104)
+    MemPut<float>(0x866B74, 82.0f);    // height (default 76); +6 paired with top to keep bottom in place
+
+    // Widescreen radar fix (https://github.com/ThirteenAG/WidescreenFixesPack)
+    MemPut<const void*>(0x58A443, &fRadarW);
+    MemPut<const void*>(0x58A793, &fRadarW);
+    MemPut<const void*>(0x58A830, &fRadarW);
+    MemPut<const void*>(0x58A8E1, &fRadarW);
+    MemPut<const void*>(0x58A984, &fRadarW);
+    MemPut<const void*>(0x58A5DA, &fRadarW);
+    MemPut<const void*>(0x58A6E0, &fRadarW);
+    MemPut<const void*>(0x5834BC, &fRadarW);
+    MemPut<const void*>(0x586041, &fRadarW);
+    MemPut<const void*>(0x5886CE, &fRadarW);
+    MemPut<const void*>(0x58439E, &fRadarW);
+    MemPut<const void*>(0x584436, &fRadarW);
+    MemPut<const void*>(0x58410D, &fRadarW);
+    MemPut<const void*>(0x584192, &fRadarW);
+    MemPut<const void*>(0x58424B, &fRadarW);
+    MemPut<const void*>(0x5842E8, &fRadarW);
+    MemPut<const void*>(0x5876D6, &fRadarW);
+    MemPut<const void*>(0x58774D, &fRadarW);
+    MemPut<const void*>(0x58780C, &fRadarW);
+    MemPut<const void*>(0x587891, &fRadarW);
+    MemPut<const void*>(0x587930, &fRadarW);
+    MemPut<const void*>(0x587A1C, &fRadarW);
+    MemPut<const void*>(0x587AAC, &fRadarW);
+    MemPut<const void*>(0x58A475, &fRadarH);
+    MemPut<const void*>(0x58A602, &fRadarH);
+    MemPut<const void*>(0x58A6A0, &fRadarH);
+    MemPut<const void*>(0x58A706, &fRadarH);
+    MemPut<const void*>(0x58A7BB, &fRadarH);
+    MemPut<const void*>(0x58A85C, &fRadarH);
+    MemPut<const void*>(0x58A90B, &fRadarH);
+    MemPut<const void*>(0x58A9BF, &fRadarH);
+    MemPut<const void*>(0x5834EE, &fRadarH);
+    MemPut<const void*>(0x58605A, &fRadarH);
+    MemPut<const void*>(0x584348, &fRadarH);
+    MemPut<const void*>(0x58440E, &fRadarH);
+    MemPut<const void*>(0x58412D, &fRadarH);
+    MemPut<const void*>(0x5841B2, &fRadarH);
+    MemPut<const void*>(0x584209, &fRadarH);
+    MemPut<const void*>(0x5842C8, &fRadarH);
+    MemPut<const void*>(0x5876BE, &fRadarH);
+    MemPut<const void*>(0x587735, &fRadarH);
+    MemPut<const void*>(0x587918, &fRadarH);
+    MemPut<const void*>(0x587A04, &fRadarH);
+    MemPut<const void*>(0x587A94, &fRadarH);
+
+    // Square radar shape
+    MemPut<const void*>(0x58585C, &fRadarSquareMask);
+    HookInstallCall(0x5751F2, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x5776FA, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x577766, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x5777E6, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x57786E, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x5778EE, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x577A29, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x577D0F, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x577EA7, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x577F2B, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x578007, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x5780B7, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x57816F, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x578223, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x578357, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x5783DB, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x5784EC, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x578573, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x578687, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x578713, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x585B96, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x586E97, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x587221, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x587604, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x58798F, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x588161, (DWORD)LimitRadarPointSquare);
+    HookInstallCall(0x58820D, (DWORD)LimitRadarPointSquare);
 
     // DISABLE SAM SITES
     MemPut<BYTE>(0x5A07D0, 0xC3);
@@ -3119,6 +3269,7 @@ bool CallBreakTowLinkHandler(CVehicleSAInterface* vehicle)
     return true;
 }
 
+
 void _declspec(naked) HOOK_CRadar__DrawRadarGangOverlay()
 {
     // clang-format off
@@ -3128,7 +3279,21 @@ void _declspec(naked) HOOK_CRadar__DrawRadarGangOverlay()
     }
     // clang-format on
 
+    if (!bRadarWPatched)
+    {
+        int iSW = *(int*)0xC17044;
+        int iSH = *(int*)0xC17048;
+        if (iSW > 0 && iSH > 0)
+        {
+            float fAsp = (float)iSW / (float)iSH;
+            float fWSW = 640.0f / (fAsp * 448.0f);
+            fRadarW = 0.0015625f * fWSW * 0.82f;
+            fRadarH = 0.002232143f;
+            bRadarWPatched = true;
+        }
+    }
     if (m_pDrawRadarAreasHandler) m_pDrawRadarAreasHandler();
+    GPS_Render();
 
     // clang-format off
     __asm
@@ -3942,6 +4107,45 @@ void _declspec(naked) HOOK_CVehicle_SetupRender()
     // clang-format on
 }
 
+// Realistic wheel: only let m_fSteerInput decay toward 0 when the vehicle is moving.
+// Parked + key released -> input is preserved, wheel stays cocked (real caster behavior).
+static const unsigned int RETURN_CAutomobile__SteerInputDecay      = 0x6AD911;
+static const unsigned int RETURN_CAutomobile__SteerInputDecay_SKIP = 0x6AD93B;
+static const float        STEER_DECAY_SPEED_SQ_THRESHOLD           = 0.0025f;
+
+void _declspec(naked) HOOK_CAutomobile__SteerInputDecay()
+{
+    // clang-format off
+    __asm
+    {
+        movsx ecx, ax                                      // replicate
+        neg   ecx                                          // replicate
+
+        test  ecx, ecx                                     // pad input == 0?
+        jnz   doDecay                                      // user holding key -> normal lerp
+
+        fld   dword ptr [esi + 0x44]                       // vx
+        fmul  st, st
+        fld   dword ptr [esi + 0x48]                       // vy
+        fmul  st, st
+        faddp st(1), st
+        fld   dword ptr [esi + 0x4C]                       // vz
+        fmul  st, st
+        faddp st(1), st                                    // st0 = |v|^2
+        fld   STEER_DECAY_SPEED_SQ_THRESHOLD
+        fcompp                                             // compare threshold vs |v|^2, pop both
+        fnstsw ax
+        test  ah, 0x41                                     // C3|C0 -> threshold <= |v|^2 (moving)
+        jnz   doDecay
+
+        jmp   RETURN_CAutomobile__SteerInputDecay_SKIP     // parked -> preserve m_fSteerInput
+
+    doDecay:
+        jmp   RETURN_CAutomobile__SteerInputDecay
+    }
+    // clang-format on
+}
+
 static DWORD          dwCVehicle_ResetAfterRender_ret = 0x6D0E43;
 void _declspec(naked) HOOK_CVehicle_ResetAfterRender()
 {
@@ -4379,6 +4583,37 @@ void CMultiplayerSA::Reset()
     m_pFireHandler = NULL;
     m_pRender3DStuffHandler = NULL;
     m_pFxSystemDestructionHandler = NULL;
+    GPS_Clear();
+}
+
+int CMultiplayerSA::SetGPSWaypoint(float fX, float fY, float fZ, DWORD dwColor, float fLineWidth)
+{
+    return GPS_SetWaypoint(fX, fY, fZ, dwColor, fLineWidth);
+}
+
+bool CMultiplayerSA::ClearGPSWaypoint(int waypointId)
+{
+    return GPS_ClearWaypoint(waypointId);
+}
+
+bool CMultiplayerSA::IsGPSWaypointActive()
+{
+    return GPS_IsActive();
+}
+
+float CMultiplayerSA::GetGPSDistance()
+{
+    return GPS_GetDistance();
+}
+
+float CMultiplayerSA::GetGPSWaypointDistance(int waypointId)
+{
+    return GPS_GetWaypointDistance(waypointId);
+}
+
+int CMultiplayerSA::GetGPSPathNodes(CVector* outNodes, int maxNodes)
+{
+    return GPS_GetPathNodes(outNodes, maxNodes);
 }
 
 void CMultiplayerSA::ConvertEulerAnglesToMatrix(CMatrix& Matrix, float fX, float fY, float fZ)
@@ -5344,7 +5579,6 @@ void __cdecl HandleIdle()
 
     ProcessDeferredStreamingMemoryRelief();
     ProcessStreamingBufferUpgrade();
-    ProcessStreamingMemoryAutoScale();
     ProcessProactiveStreamingCleanup();
     EnforceDrawDistances();
     m_pIdleHandler();

@@ -62,6 +62,7 @@ bool CWebBrowserItem::IsValid()
 ////////////////////////////////////////////////////////////////
 void CWebBrowserItem::OnLostDevice()
 {
+    SAFE_RELEASE(m_pD3DRenderTargetSurface)
 }
 
 ////////////////////////////////////////////////////////////////
@@ -73,6 +74,11 @@ void CWebBrowserItem::OnLostDevice()
 ////////////////////////////////////////////////////////////////
 void CWebBrowserItem::OnResetDevice()
 {
+    if (!m_pD3DTexture || m_pD3DRenderTargetSurface)
+        return;
+
+    if (FAILED(((IDirect3DTexture9*)m_pD3DTexture)->GetSurfaceLevel(0, &m_pD3DRenderTargetSurface)))
+        SAFE_RELEASE(m_pD3DRenderTargetSurface)
 }
 
 ////////////////////////////////////////////////////////////////

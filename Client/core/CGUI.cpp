@@ -11,6 +11,7 @@
 
 #include "StdInc.h"
 #include "CNewsBrowser.h"
+#include <core/CNuiCoreInterface.h>
 #include <game/CGame.h>
 #include <windowsx.h>
 
@@ -772,10 +773,13 @@ bool CLocalGUI::InputGoesToGUI()
     if (!pGUI)
         return false;
 
-    // Here we're supposed to check if things like menues are up, console is up or the chatbox is expecting input
-    // If the console is visible OR the chat is expecting input OR the mainmenu is visible
+    bool bNuiSink = false;
+    if (auto* pWebCore = g_pCore->GetWebCore())
+        if (auto* pNui = pWebCore->GetNuiCore())
+            bNuiSink = pNui->IsFocused() && !pNui->IsKeepInput();
+
     return (IsConsoleVisible() || IsMainMenuVisible() || IsChatBoxInputEnabled() || m_bForceCursorVisible || pGUI->GetGUIInputEnabled() ||
-            !CCore::GetSingleton().IsFocused() || IsWebRequestGUIVisible());
+            !CCore::GetSingleton().IsFocused() || IsWebRequestGUIVisible() || bNuiSink);
 }
 
 void CLocalGUI::ForceCursorVisible(bool bVisible)

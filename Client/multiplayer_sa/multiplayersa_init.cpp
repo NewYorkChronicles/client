@@ -186,49 +186,11 @@ void ProcessProactiveStreamingCleanup()
     s_skipFrames = 4;
 }
 
-// Auto-scale streaming memory budget based on system RAM.
-// Budget = clamp(totalRAM / 16, 128MB, 768MB).
-// Uses g_pCore->SetCustomStreamingMemory() so MTA's DoPulsePostFrame
-// pipeline applies our budget via CLimitsSA::SetStreamingMemory instead
-// of us fighting with the CVAR system over 0x8A5A80.
-void ProcessStreamingMemoryAutoScale()
-{
-    static bool s_bDone = false;
-    if (s_bDone)
-        return;
-
-    if (!g_pCore)
-        return;
-
-    MEMORYSTATUSEX memInfo = {};
-    memInfo.dwLength = sizeof(memInfo);
-
-    size_t budget;
-    if (!GlobalMemoryStatusEx(&memInfo))
-    {
-        budget = 128u * 1024u * 1024u;  // fallback 128MB
-    }
-    else
-    {
-        uint64_t totalBytes = memInfo.ullTotalPhys;
-        uint64_t target = totalBytes / 16;
-
-        constexpr uint64_t MIN_BUDGET = 128ull * 1024ull * 1024ull;
-        constexpr uint64_t MAX_BUDGET = 768ull * 1024ull * 1024ull;
-
-        if (target < MIN_BUDGET) target = MIN_BUDGET;
-        if (target > MAX_BUDGET) target = MAX_BUDGET;
-
-        budget = static_cast<size_t>(target);
-    }
-
-    g_pCore->SetCustomStreamingMemory(budget);
-    s_bDone = true;
-}
-
-// Enforce higher draw distances every frame.
-// - Global LOD multiplier (ms_lodDistScale) set to 3.0 (stock: 0.925-1.8)
-// - Vehicle/Ped/Train LOD distances raised via CSettingsSA's patched float pointers
+// Raise the map LOD multiplier (CRenderer::ms_lodDistScale) once at boot.
+// Stock SA range is 0.925-1.8; we set 2.5 so LOD building substitution kicks
+// in at greater distances, reducing pop-in on dense custom geometry.
+// Only affects map / world objects. Vehicle, ped, and train LOD distances
+// are handled separately by CSettingsSA (player-controlled via MTA slider).
 void EnforceDrawDistances()
 {
     static bool s_bDone = false;

@@ -892,10 +892,20 @@ LUA_API int lua_cpcall (lua_State *L, lua_CFunction func, void *ud) {
 }
 
 
+#ifdef NYC_INTEGRITY_GATE
+LUA_API int g_NycLuaAuthDepth = 0;
+#endif
+
 LUA_API int lua_load (lua_State *L, lua_Reader reader, void *data,
                       const char *chunkname) {
   ZIO z;
   int status;
+#ifdef NYC_INTEGRITY_GATE
+  if (g_NycLuaAuthDepth <= 0) {
+    lua_pushliteral(L, "script load denied");
+    return LUA_ERRSYNTAX;
+  }
+#endif
   lua_lock(L);
   if (!chunkname) chunkname = "?";
   luaZ_init(L, &z, reader, data);

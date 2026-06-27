@@ -113,6 +113,33 @@ int CLuaFunctionDefs::SetCursorAlpha(lua_State* luaVM)
     return 1;
 }
 
+int CLuaFunctionDefs::SetCursorState(lua_State* luaVM)
+{
+    SString state;
+    CScriptArgReader argStream(luaVM);
+    argStream.ReadString(state);
+    if (argStream.HasErrors()) { lua_pushboolean(luaVM, false); return 1; }
+
+    static const std::unordered_map<std::string, const char*> kMap{
+        {"default",     "MouseArrow"},
+        {"pointer",     "MouseHand"},
+        {"hand",        "MouseHand"},
+        {"move",        "MouseMoveCursor"},
+        {"ew-resize",   "EWSizingCursorImage"},
+        {"ns-resize",   "NSSizingCursorImage"},
+        {"nesw-resize", "NESWSizingCursorImage"},
+        {"nwse-resize", "NWSESizingCursorImage"},
+    };
+
+    auto it = kMap.find(std::string(state.c_str()));
+    auto* gui = g_pCore->GetGUI();
+    if (it == kMap.end() || !gui) { lua_pushboolean(luaVM, false); return 1; }
+
+    gui->SetCursorImage("CGUI-Images", it->second);
+    lua_pushboolean(luaVM, true);
+    return 1;
+}
+
 int CLuaFunctionDefs::ShowCursor(lua_State* luaVM)
 {
     bool             bShow = false, bToggleControls = true;

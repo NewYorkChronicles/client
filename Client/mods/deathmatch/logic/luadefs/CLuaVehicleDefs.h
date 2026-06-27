@@ -182,6 +182,10 @@ public:
     static std::unordered_map<std::string, float> GetVehicleModelAudioSettings(uint32_t uiModel);
     static std::unordered_map<std::string, float> GetVehicleAudioSettings(CClientVehicle* pVehicle);
 
+    LUA_DECLARE(GetVehicleMaterials);
+    LUA_DECLARE(GetVehicleSteerAngle);
+    LUA_DECLARE(SetVehicleSteerAngle);
+
     // Components
     LUA_DECLARE(SetVehicleComponentPosition);
     LUA_DECLARE_OOP(GetVehicleComponentPosition);

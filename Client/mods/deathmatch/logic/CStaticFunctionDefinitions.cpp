@@ -241,28 +241,10 @@ bool CStaticFunctionDefinitions::WasEventCancelled()
     return m_pEvents->WasEventCancelled();
 }
 
-static SString GenerateObfuscatedPath(const char* szCacheRoot, const char* szResourceName, const char* szFileName)
-{
-    unsigned int hash = 0x811c9dc5;
-    const char*  parts[] = {szResourceName, "|", szFileName, "|", "NewYorkChronicles"};
-    for (int p = 0; p < 5; p++)
-        for (const char* c = parts[p]; *c; c++)
-        {
-            hash ^= (unsigned char)*c;
-            hash *= 0x01000193;
-        }
-
-    char hexName[17];
-    sprintf(hexName, "%08x%08x", hash, hash ^ 0xDEADBEEF);
-
-    SString strPath("%s\\cache\\%s.nyc", szCacheRoot, hexName);
-    return strPath;
-}
-
 bool CStaticFunctionDefinitions::DownloadFile(CResource* pResource, const char* szFile, CResource* pRequestResource, CChecksum checksum)
 {
     SString strHTTPDownloadURLFull("%s/%s/%s", g_pClientGame->GetHTTPURL().c_str(), pResource->GetName(), szFile);
-    SString strPath = GenerateObfuscatedPath(g_pClientGame->GetFileCacheRoot(), pResource->GetName(), szFile);
+    SString strPath("%s\\resources\\%s\\%s", g_pClientGame->GetFileCacheRoot(), pResource->GetName(), szFile);
 
     // Call SingularFileDownloadManager
     if (g_pClientGame->GetSingularFileDownloadManager())

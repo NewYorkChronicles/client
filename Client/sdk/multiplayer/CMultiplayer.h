@@ -467,4 +467,11 @@ public:
 
     virtual unsigned int EntryInfoNodePool_NoOfUsedSpaces() const noexcept = 0;
     virtual unsigned int PtrNodeDoubleLinkPool_NoOfUsedSpaces() const noexcept = 0;
+
+    virtual int   SetGPSWaypoint(float fX, float fY, float fZ, DWORD dwColor, float fLineWidth) = 0;
+    virtual bool  ClearGPSWaypoint(int waypointId = 0) = 0;
+    virtual bool  IsGPSWaypointActive() = 0;
+    virtual float GetGPSDistance() = 0;
+    virtual float GetGPSWaypointDistance(int waypointId) = 0;
+    virtual int   GetGPSPathNodes(CVector* outNodes, int maxNodes) = 0;
 };

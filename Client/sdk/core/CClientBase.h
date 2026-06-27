@@ -32,6 +32,7 @@ public:
 
     virtual bool HandleException(CExceptionInformation* pExceptionInformation) = 0;
     virtual void GetPlayerNames(std::vector<SString>& vPlayerNames) = 0;
+    virtual void GetCommandSuggestions(const char* szPrefix, std::vector<std::pair<SString, SString>>& outResults) = 0;
 
     virtual void OnWindowFocusChange(bool state) = 0;
 };

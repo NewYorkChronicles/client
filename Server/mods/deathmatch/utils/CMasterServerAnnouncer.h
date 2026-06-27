@@ -244,6 +244,10 @@ public:
 
         CMainConfig* pMainConfig = g_pGame->GetConfig();
         SString      strServerIP = pMainConfig->GetServerIP();
+        // If a relay IP is configured, advertise that to the master server
+        // instead of the local bind IP (so origin stays hidden behind a DDoS relay).
+        SString      strRelayServerIP = pMainConfig->GetRelayServerIP();
+        SString      strAnnounceIP = strRelayServerIP.empty() ? strServerIP : strRelayServerIP;
         ushort       usServerPort = pMainConfig->GetServerPort();
         ushort       usHTTPPort = pMainConfig->GetHTTPPort();
         uint         uiMaxPlayerCount = pMainConfig->GetMaxPlayers();
@@ -260,7 +264,7 @@ public:
         strUrl = strUrl.Replace("%HTTP%", SString("%u", usHTTPPort));
         strUrl = strUrl.Replace("%VER%", strVersion);
         strUrl = strUrl.Replace("%EXTRA%", strExtra);
-        strUrl = strUrl.Replace("%IP%", strServerIP);
+        strUrl = strUrl.Replace("%IP%", strAnnounceIP);
 
         SMasterServerDefinition masterServerDefinition = {bAcceptsPush, bDoReminders, bHideProblems, bHideSuccess, uiReminderIntervalMins, strDesc, strUrl};
         m_MasterServerList.push_back(new CMasterServer(masterServerDefinition));

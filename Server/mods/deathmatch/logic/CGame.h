@@ -13,6 +13,7 @@ class CGame;
 
 #pragma once
 
+#include <array>
 #include "CCommon.h"
 #include <net/CNetServer.h>
 #include "CClient.h"
@@ -692,4 +693,6 @@ private:
     };
 
     std::map<CPlayer*, ClientTriggeredEventsInfo> m_mapClientTriggeredEvents;
+
+    std::map<unsigned long, std::array<uint8_t, 16>> m_pendingAuth;
 };

@@ -234,7 +234,7 @@ void CClientVariables::ValidateValues()
     ClampValue("console_size", CVector2D(50, 50), CVector2D(uiViewportWidth - 32, uiViewportHeight - 32));
     ClampValue("fps_limit", 0, std::numeric_limits<short>::max());
     ClampValue("chat_font", 0, 3);
-    ClampValue("chat_lines", 3, 62);
+    ClampValue("chat_lines", 3, 100);
     ClampValue("chat_color", CColor(0, 0, 0, 0), CColor(255, 255, 255, 255));
     ClampValue("chat_text_color", CColor(0, 0, 0, 128), CColor(255, 255, 255, 255));
     ClampValue("chat_input_color", CColor(0, 0, 0, 0), CColor(255, 255, 255, 255));
@@ -249,6 +249,13 @@ void CClientVariables::ValidateValues()
     ClampValue("chat_position_horizontal", Chat::Position::Horizontal::LEFT, Chat::Position::Horizontal::RIGHT);
     ClampValue("chat_position_vertical", Chat::Position::Vertical::TOP, Chat::Position::Vertical::BOTTOM);
     ClampValue("chat_text_alignment", Chat::Text::Align::LEFT, Chat::Text::Align::RIGHT);
+    ClampValue("chat_input_border_color", CColor(0, 0, 0, 0), CColor(255, 255, 255, 255));
+    ClampValue("chat_input_box_color", CColor(0, 0, 0, 0), CColor(255, 255, 255, 255));
+    ClampValue("chat_suggestion_bg_color", CColor(0, 0, 0, 0), CColor(255, 255, 255, 255));
+    ClampValue("chat_suggestion_text_color", CColor(0, 0, 0, 0), CColor(255, 255, 255, 255));
+    ClampValue("chat_scrollbar_track_color", CColor(0, 0, 0, 0), CColor(255, 255, 255, 255));
+    ClampValue("chat_scrollbar_thumb_color", CColor(0, 0, 0, 0), CColor(255, 255, 255, 255));
+    ClampValue("chat_caret_color", CColor(0, 0, 0, 0), CColor(255, 255, 255, 255));
     ClampValue("text_scale", 0.8f, 3.0f);
     ClampValue("mastervolume", 0.0f, 1.0f);
     ClampValue("mtavolume", 0.0f, 1.0f);
@@ -288,28 +295,38 @@ void CClientVariables::LoadDefaults()
     DEFAULT("console_size", CVector2D(200, 200));              // console size
     DEFAULT("serverbrowser_size", CVector2D(720.0f, 495.0f));  // serverbrowser size
     DEFAULT("fps_limit", 100);                                 // frame limiter
-    DEFAULT("chat_font", 2);                                   // chatbox font type
-    DEFAULT("chat_lines", 10);                                 // chatbox lines
-    DEFAULT("chat_color", CColor(0, 0, 0, 0));                 // chatbox background color
-    DEFAULT("chat_text_color", CColor(172, 213, 254, 255));    // chatbox text color
-    DEFAULT("chat_text_outline", false);
-    DEFAULT("chat_input_color", CColor(0, 0, 0, 0));                 // chatbox input background color
-    DEFAULT("chat_input_prefix_color", CColor(172, 213, 254, 255));  // chatbox input prefix color
-    DEFAULT("chat_input_text_color", CColor(172, 213, 254, 255));    // chatbox input text color
-    DEFAULT("chat_scale", CVector2D(1.0f, 1.0f));                    // chatbox scale
-    DEFAULT("chat_width", 1.5f);                                     // chatbox width
-
-    DEFAULT("chat_css_style_text", false);                                  // chatbox css/hl style text
-    DEFAULT("chat_css_style_background", false);                            // chatbox css/hl style background
-    DEFAULT("chat_line_life", 12000);                                       // chatbox line life time
-    DEFAULT("chat_line_fade_out", 3000);                                    // chatbox line fade out time
-    DEFAULT("chat_use_cegui", false);                                       // chatbox uses cegui
-    DEFAULT("chat_nickcompletion", true);                                   // chatbox nick completion
-    DEFAULT("chat_position_offset_x", 0.0125f);                             // chatbox relative x position offset
-    DEFAULT("chat_position_offset_y", 0.015f);                              // chatbox relative y position offset
-    DEFAULT("chat_position_horizontal", Chat::Position::Horizontal::LEFT);  // chatbox horizontal position
-    DEFAULT("chat_position_vertical", Chat::Position::Vertical::TOP);       // chatbox vertical position
-    DEFAULT("chat_text_alignment", Chat::Text::Align::LEFT);                // chatbox horizontal text alignment
+    DEFAULT("chat_font", 2);
+    DEFAULT("chat_lines", 17);
+    DEFAULT("chat_color", CColor(0, 0, 0, 0));
+    DEFAULT("chat_text_color", CColor(255, 255, 255, 255));
+    DEFAULT("chat_text_outline", true);
+    DEFAULT("chat_input_color", CColor(0, 0, 0, 0));
+    DEFAULT("chat_input_prefix_color", CColor(172, 213, 254, 255));
+    DEFAULT("chat_input_text_color", CColor(255, 0, 17, 128));
+    DEFAULT("chat_scale", CVector2D(1.6f, 1.6f));
+    DEFAULT("chat_width", 1.5f);
+    DEFAULT("chat_css_style_text", false);
+    DEFAULT("chat_css_style_background", false);
+    DEFAULT("chat_line_life", 12000);
+    DEFAULT("chat_line_fade_out", 3000);
+    DEFAULT("chat_use_cegui", false);
+    DEFAULT("chat_nickcompletion", true);
+    DEFAULT("chat_position_offset_x", 0.0125f);
+    DEFAULT("chat_position_offset_y", 0.015f);
+    DEFAULT("chat_position_horizontal", Chat::Position::Horizontal::LEFT);
+    DEFAULT("chat_position_vertical", Chat::Position::Vertical::TOP);
+    DEFAULT("chat_text_alignment", Chat::Text::Align::LEFT);
+    DEFAULT("chat_timestamps", true);
+    DEFAULT("chat_suggestions", true);
+    DEFAULT("chat_scrollbar", true);
+    DEFAULT("chat_scrollbar_always", true);
+    DEFAULT("chat_input_border_color", CColor(255, 0, 0, 77));
+    DEFAULT("chat_input_box_color", CColor(15, 15, 15, 115));
+    DEFAULT("chat_suggestion_bg_color", CColor(255, 20, 20, 28));
+    DEFAULT("chat_suggestion_text_color", CColor(232, 224, 208, 220));
+    DEFAULT("chat_scrollbar_track_color", CColor(255, 0, 0, 53));
+    DEFAULT("chat_scrollbar_thumb_color", CColor(255, 0, 15, 124));
+    DEFAULT("chat_caret_color", CColor(255, 0, 0, 200));
     DEFAULT("server_can_flash_window", true);                               // allow server to flash the window
     DEFAULT("allow_tray_notifications", true);                              // allow scripts to create tray balloon notifications
     DEFAULT("text_scale", 1.0f);                                            // text scale
@@ -366,7 +383,7 @@ void CClientVariables::LoadDefaults()
         Set("borderless_apply_windowed", legacyEnable);
     }
     DEFAULT("vertical_aim_sensitivity", 0.0015f);        // 0.0015f is GTA default setting
-    DEFAULT("process_priority", 0);                      // 0-normal 1-above normal 2-high
+    DEFAULT("process_priority", 2);                      // 0-normal 1-above normal 2-high
     DEFAULT("process_dpi_aware", false);                 // Enable DPI awareness in core initialization
     DEFAULT("mute_master_when_minimized", 0);            // 0-off 1-on
     DEFAULT("mute_sfx_when_minimized", 0);               // 0-off 1-on

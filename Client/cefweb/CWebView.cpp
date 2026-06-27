@@ -9,6 +9,7 @@
  *****************************************************************************/
 #include "StdInc.h"
 #include "CWebView.h"
+#include "CNuiCore.h"
 #include "CAjaxResourceHandler.h"
 #include <cef3/cef/include/cef_parser.h>
 #include <cef3/cef/include/cef_task.h>
@@ -19,6 +20,12 @@
 namespace
 {
     const int CEF_PIXEL_STRIDE = 4;
+
+    // First-party host: bypasses the request-filter for local NUI views.
+    bool IsFirstPartyHost(const SString& host)
+    {
+        return host.CompareI("newyorkchronicles.online") == 0 || host.EndsWithI(".newyorkchronicles.online");
+    }
 }
 
 CWebView::CWebView(bool bIsLocal, CWebBrowserItem* pWebBrowserRenderItem, bool bTransparent)
@@ -690,40 +697,44 @@ void CWebView::InjectMouseMove(int iPosX, int iPosY)
     m_vecMousePosition.y = iPosY;
 }
 
-void CWebView::InjectMouseDown(eWebBrowserMouseButton mouseButton, int count)
+void CWebView::InjectMouseDown(eWebBrowserMouseButton mouseButton, int count, int iPosX, int iPosY)
 {
     if (!m_pWebView)
         return;
+
+    if (iPosX != INT_MIN) { m_vecMousePosition.x = iPosX; m_vecMousePosition.y = iPosY; }
 
     CefMouseEvent mouseEvent;
     mouseEvent.x = m_vecMousePosition.x;
     mouseEvent.y = m_vecMousePosition.y;
 
-    // Save mouse button states
     m_mouseButtonStates[static_cast<int>(mouseButton)] = true;
 
     m_pWebView->GetHost()->SendMouseClickEvent(mouseEvent, static_cast<CefBrowserHost::MouseButtonType>(mouseButton), false, count);
 }
 
-void CWebView::InjectMouseUp(eWebBrowserMouseButton mouseButton)
+void CWebView::InjectMouseUp(eWebBrowserMouseButton mouseButton, int iPosX, int iPosY)
 {
     if (!m_pWebView)
         return;
+
+    if (iPosX != INT_MIN) { m_vecMousePosition.x = iPosX; m_vecMousePosition.y = iPosY; }
 
     CefMouseEvent mouseEvent;
     mouseEvent.x = m_vecMousePosition.x;
     mouseEvent.y = m_vecMousePosition.y;
 
-    // Save mouse button states
     m_mouseButtonStates[static_cast<int>(mouseButton)] = false;
 
     m_pWebView->GetHost()->SendMouseClickEvent(mouseEvent, static_cast<CefBrowserHost::MouseButtonType>(mouseButton), true, 1);
 }
 
-void CWebView::InjectMouseWheel(int iScrollVert, int iScrollHorz)
+void CWebView::InjectMouseWheel(int iScrollVert, int iScrollHorz, int iPosX, int iPosY)
 {
     if (!m_pWebView)
         return;
+
+    if (iPosX != INT_MIN) { m_vecMousePosition.x = iPosX; m_vecMousePosition.y = iPosY; }
 
     CefMouseEvent mouseEvent;
     mouseEvent.x = m_vecMousePosition.x;
@@ -1193,6 +1204,8 @@ void CWebView::OnPaint(CefRefPtr<CefBrowser> browser, CefRenderHandler::PaintEle
         m_RenderData.buffer = nullptr;
         m_RenderData.dirtyRects.clear();
         m_RenderData.dirtyRects.shrink_to_fit();
+        m_RenderData.popupBuffer.reset();
+        m_RenderData.popupRect = CefRect{};
         m_RenderData.cefThreadState = ECefThreadState::Running;
     }
 }
@@ -1280,7 +1293,9 @@ bool CWebView::OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>
         SString host = UTF16ToMbUTF8(urlParts.host.str);
         if (host != "mta")
         {
-            if (IsLocal() || g_pCore->GetWebCore()->GetDomainState(host, true) != eURLState::WEBPAGE_ALLOWED)
+            if (IsFirstPartyHost(host))
+                bResult = false;  // Always allow first-party
+            else if (IsLocal() || g_pCore->GetWebCore()->GetDomainState(host, true) != eURLState::WEBPAGE_ALLOWED)
                 bResult = true;  // Block remote here
             else
                 bResult = false;  // Allow
@@ -1352,6 +1367,9 @@ CefResourceRequestHandler::ReturnValue CWebView::OnBeforeResourceLoad(CefRefPtr<
     {
         if (domain != "mta")
         {
+            if (IsFirstPartyHost(domain))
+                return RV_CONTINUE;  // First-party always allowed (including local NUI)
+
             if (IsLocal())
                 return RV_CANCEL;  // Block remote requests in local mode generally
 
@@ -1554,10 +1572,34 @@ bool CWebView::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_
 ////////////////////////////////////////////////////////////////////
 bool CWebView::OnCursorChange(CefRefPtr<CefBrowser> browser, CefCursorHandle cursor, cef_cursor_type_t type, const CefCursorInfo& cursorInfo)
 {
-    // Find the cursor index by the cursor handle
-    unsigned char cursorIndex = static_cast<unsigned char>(type);
+    if (this == CNuiCore::Get().GetRoot())
+    {
+        static constexpr const char* kImage[] = {
+            "MouseArrow",                "MouseArrow",                "MouseHand",                 "MouseArrow",
+            "MouseArrow",                "MouseArrow",                "EWSizingCursorImage",       "NSSizingCursorImage",
+            "NESWSizingCursorImage",     "NWSESizingCursorImage",     "NSSizingCursorImage",       "NWSESizingCursorImage",
+            "NESWSizingCursorImage",     "EWSizingCursorImage",       "NSSizingCursorImage",       "EWSizingCursorImage",
+            "NESWSizingCursorImage",     "NWSESizingCursorImage",     "EWSizingCursorImage",       "NSSizingCursorImage",
+            "MouseArrow",                "EWSizingCursorImage",       "NSSizingCursorImage",       "NESWSizingCursorImage",
+            "NWSESizingCursorImage",     "NSSizingCursorImage",       "NWSESizingCursorImage",     "NESWSizingCursorImage",
+            "EWSizingCursorImage",       "MouseMoveCursor",           "MouseArrow",                "MouseArrow",
+            "MouseArrow",                "MouseArrow",                "MouseArrow",                "MouseArrow",
+            "MouseArrow",                "MouseArrow",                "MouseArrow",                "MouseArrow",
+            "MouseArrow",                "MouseHand",                 "MouseHand",                 "MouseArrow",
+        };
+        const unsigned idx = static_cast<unsigned>(type);
+        const char* image = (idx < std::size(kImage)) ? kImage[idx] : "MouseArrow";
+        if (auto* gui = g_pCore->GetGUI())
+            gui->SetCursorImage("CGUI-Images", image);
 
-    // Queue event to run on the main thread
+        HCURSOR h = (type == CT_POINTER || !cursor) ? LoadCursor(NULL, IDC_ARROW) : cursor;
+        if (HWND hwnd = g_pCore->GetHookedWindow())
+            SetClassLongPtrW(hwnd, GCLP_HCURSOR, reinterpret_cast<LONG_PTR>(h));
+        SetCursor(h);
+        return true;
+    }
+
+    unsigned char cursorIndex = static_cast<unsigned char>(type);
     QueueBrowserEvent("OnCursorChange", [cursorIndex](CWebBrowserEventsInterface* iface) { iface->Events_OnChangeCursor(cursorIndex); });
 
     return false;

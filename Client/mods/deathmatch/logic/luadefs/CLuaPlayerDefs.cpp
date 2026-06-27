@@ -43,6 +43,7 @@ void CLuaPlayerDefs::LoadFunctions()
         {"setPlayerNametagShowing", SetPlayerNametagShowing},
         {"setPlayerHudComponentProperty", ArgumentParser<SetPlayerHudComponentProperty>},
         {"resetPlayerHudComponentProperty", ArgumentParser<ResetPlayerHudComponentProperty>},
+        {"getVisiblePlayers", GetVisiblePlayers},
 
         // Community funcs
         {"getPlayerUserName", GetPlayerUserName},
@@ -1053,4 +1054,102 @@ CLuaPlayerDefs::GetPlayerHudComponentProperty(eHudComponent component, eHudCompo
     }
 
     return false;
+}
+
+int CLuaPlayerDefs::GetVisiblePlayers(lua_State* luaVM)
+{
+    //  table getVisiblePlayers ( [ float range=20, int dimension=localPlayerDim ] )
+    //  Returns: { {player=element, sx=float, sy=float, dist=float, hx=float, hy=float, hz=float}, ... }
+    float          fRange;
+    unsigned short usDimension;
+
+    CClientPlayer* pLocalPlayer = m_pPlayerManager->GetLocalPlayer();
+    unsigned short usLocalDim = pLocalPlayer ? pLocalPlayer->GetDimension() : 0;
+
+    CScriptArgReader argStream(luaVM);
+    argStream.ReadNumber(fRange, 20.0f);
+    argStream.ReadNumber(usDimension, usLocalDim);
+
+    if (argStream.HasErrors())
+    {
+        m_pScriptDebugging->LogCustom(luaVM, argStream.GetFullErrorMessage());
+        lua_pushboolean(luaVM, false);
+        return 1;
+    }
+
+    lua_newtable(luaVM);
+
+    if (!pLocalPlayer)
+        return 1;
+
+    float fRangeSq = fRange * fRange;
+    CVector vecLocal;
+    pLocalPlayer->GetPosition(vecLocal);
+
+    int iIndex = 0;
+    for (auto it = m_pPlayerManager->IterBegin(); it != m_pPlayerManager->IterEnd(); ++it)
+    {
+        CClientPlayer* pPlayer = *it;
+        if (pPlayer->GetDimension() != usDimension)
+            continue;
+        if (!pPlayer->IsStreamedIn())
+            continue;
+        if (pPlayer->GetAlpha() < 255)
+            continue;
+
+        CVector vecPos;
+        pPlayer->GetPosition(vecPos);
+        float fDX = vecPos.fX - vecLocal.fX;
+        float fDY = vecPos.fY - vecLocal.fY;
+        float fDZ = vecPos.fZ - vecLocal.fZ;
+        float fDistSq = fDX * fDX + fDY * fDY + fDZ * fDZ;
+        if (fDistSq > fRangeSq)
+            continue;
+
+        if (!pPlayer->IsOnScreen())
+            continue;
+
+        CVector vecHead;
+        pPlayer->GetBonePosition(BONE_HEAD, vecHead);
+
+        CVector vecScreen;
+        CVector vecAboveHead(vecHead.fX, vecHead.fY, vecHead.fZ + 0.5f);
+        if (!CStaticFunctionDefinitions::GetScreenFromWorldPosition(vecAboveHead, vecScreen, 0, true))
+            continue;
+
+        iIndex++;
+        lua_newtable(luaVM);
+
+        lua_pushstring(luaVM, "player");
+        lua_pushelement(luaVM, pPlayer);
+        lua_rawset(luaVM, -3);
+
+        lua_pushstring(luaVM, "sx");
+        lua_pushnumber(luaVM, vecScreen.fX);
+        lua_rawset(luaVM, -3);
+
+        lua_pushstring(luaVM, "sy");
+        lua_pushnumber(luaVM, vecScreen.fY);
+        lua_rawset(luaVM, -3);
+
+        lua_pushstring(luaVM, "dist");
+        lua_pushnumber(luaVM, sqrtf(fDistSq));
+        lua_rawset(luaVM, -3);
+
+        lua_pushstring(luaVM, "hx");
+        lua_pushnumber(luaVM, vecHead.fX);
+        lua_rawset(luaVM, -3);
+
+        lua_pushstring(luaVM, "hy");
+        lua_pushnumber(luaVM, vecHead.fY);
+        lua_rawset(luaVM, -3);
+
+        lua_pushstring(luaVM, "hz");
+        lua_pushnumber(luaVM, vecHead.fZ);
+        lua_rawset(luaVM, -3);
+
+        lua_rawseti(luaVM, -2, iIndex);
+    }
+
+    return 1;
 }

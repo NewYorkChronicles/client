@@ -104,4 +104,6 @@
     <Image Height="25" Name="TabBackground" Width="20" XPos="75" YPos="135" />
     <Image Height="25" Name="TabLeft" Width="4" XPos="71" YPos="135" />
     <Image Height="25" Name="TabRight" Width="6" XPos="95" YPos="135" />
+    <Image Name="MouseHand" XPos="0" YPos="257" Width="18" Height="22" />
+
 </Imageset>

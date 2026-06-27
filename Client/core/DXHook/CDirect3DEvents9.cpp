@@ -10,6 +10,7 @@
  *****************************************************************************/
 
 #include "StdInc.h"
+#include <core/CNuiCoreInterface.h>
 #include <d3dx9shader.h>
 #include <game/CRenderWare.h>
 #define DECLARE_PROFILER_SECTION_CDirect3DEvents9
@@ -619,6 +620,11 @@ void CDirect3DEvents9::OnPresent(IDirect3DDevice9* pDevice)
 
     // Draw pre-GUI primitives
     CGraphics::GetSingleton().DrawPreGUIQueue();
+
+    // Draw NUI between world and GUI so pause menu / chat hide it.
+    if (auto* pWebCore = g_pCore->GetWebCore())
+        if (auto* pNui = pWebCore->GetNuiCore())
+            pNui->Draw();
 
     // Maybe grab screen for upload
     CGraphics::GetSingleton().GetScreenGrabber()->DoPulse();

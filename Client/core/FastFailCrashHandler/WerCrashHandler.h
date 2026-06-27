@@ -75,7 +75,7 @@ namespace WerCrash
     [[nodiscard]] WerDumpResult FindAndRenameWerDump(const SString& dumpDir, const SString& moduleName, DWORD offset, DWORD exceptionCode,
                                                      const std::optional<FileTimeDuration>& processCreationTime);
 
-    [[nodiscard]] bool IsFileRecentEnough(HANDLE hFile, std::uint64_t maxAgeMinutes = 15) noexcept;
+    [[nodiscard]] bool IsFileRecentEnough(HANDLE hFile, std::uint64_t maxAgeMinutes = 1) noexcept;
 
     void UpdateModuleBases();
 

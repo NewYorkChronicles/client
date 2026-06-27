@@ -231,6 +231,7 @@
         <Property name="PushedTextColour" value="FFFFFFFF" />
         <Property name="DisabledTextColour" value="FF000000" />
         <Property name="WantsMultiClickEvents" value="False" />
+        <Property name="MouseCursorImage" value="set:CGUI-Images image:MouseHand" />
         <ImagerySection name="frame">
             <FrameComponent>
                 <Area>
@@ -381,6 +382,7 @@
         <Property name="PushedTextColour" value="FFFFFFFF" />
         <Property name="DisabledTextColour" value="FF666666" />
         <Property name="WantsMultiClickEvents" value="False" />
+        <Property name="MouseCursorImage" value="set:CGUI-Images image:MouseHand" />
         <ImagerySection name="label">
             <TextComponent>
                 <Area>
@@ -1558,6 +1560,7 @@
     </WidgetLook>
 
     <WidgetLook name="CGUI/Checkbox">
+        <Property name="MouseCursorImage" value="set:CGUI-Images image:MouseHand" />
         <ImagerySection name="label">
             <TextComponent>
                 <Area>
@@ -1683,6 +1686,7 @@
     </WidgetLook>
 
     <WidgetLook name="CGUI/RadioButton">
+        <Property name="MouseCursorImage" value="set:CGUI-Images image:MouseHand" />
         <ImagerySection name="label">
             <TextComponent>
                 <Area>

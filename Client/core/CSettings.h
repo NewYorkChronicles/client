@@ -354,6 +354,10 @@ protected:
     CGUIEdit*     m_pChatLineFadeout;
     CGUICheckBox* m_pFlashWindow;
     CGUICheckBox* m_pTrayBalloon;
+    CGUICheckBox* m_pChatTimestamps;
+    CGUICheckBox* m_pChatSuggestions;
+    CGUICheckBox* m_pChatScrollbar;
+    CGUICheckBox* m_pChatScrollbarAlways;
 
     CGUILabel*    m_pLabelBrowserGeneral;
     CGUICheckBox* m_pCheckBoxRemoteBrowser;

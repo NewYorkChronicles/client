@@ -27,6 +27,7 @@ void CLuaDrawingDefs::LoadFunctions()
         {"dxDrawMaterialSectionLine3D", DxDrawMaterialSectionLine3D},
         {"dxDrawLine3D", DxDrawLine3D},
         {"dxDrawText", DxDrawText},
+        {"dxDrawTextOutlined", DxDrawTextOutlined},
         {"dxDrawRectangle", DxDrawRectangle},
         {"dxDrawCircle", DxDrawCircle},
         {"dxDrawImage", DxDrawImage},
@@ -405,6 +406,111 @@ int CLuaDrawingDefs::DxDrawText(lua_State* luaVM)
         m_pScriptDebugging->LogCustom(luaVM, argStream.GetFullErrorMessage());
 
     // Failed
+    lua_pushboolean(luaVM, false);
+    return 1;
+}
+
+int CLuaDrawingDefs::DxDrawTextOutlined(lua_State* luaVM)
+{
+    //  bool dxDrawTextOutlined ( string text, float left, float top [, float right=left, float bottom=top, int color=white, float scale=1, mixed font="default",
+    //      string alignX="left", string alignY="top", bool clip=false, bool wordBreak=false, bool postGUI=false, bool colorCoded=false,
+    //      bool subPixelPositioning=false, float rotation=0, float rotationCenterX=(left+right)/2, float rotationCenterY=(top+bottom)/2,
+    //      int outlineColor=black, int outlineWidth=1] )
+    SString            strText;
+    CVector2D          vecTopLeft;
+    CVector2D          vecBottomRight;
+    SColor             color;
+    float              fScaleX;
+    float              fScaleY;
+    eFontType          fontType;
+    CClientDxFont*     pDxFontElement;
+    eDXHorizontalAlign alignX;
+    eDXVerticalAlign   alignY;
+    bool               bClip;
+    bool               bWordBreak;
+    bool               bPostGUI;
+    bool               bColorCoded;
+    bool               bSubPixelPositioning;
+    float              fRotation;
+    CVector2D          vecRotationOrigin;
+    float              fLineHeight;
+    SColor             outlineColor;
+    int                iOutlineWidth;
+
+    CScriptArgReader argStream(luaVM);
+    argStream.ReadString(strText);
+    argStream.ReadVector2D(vecTopLeft);
+    if (argStream.NextIsUserDataOfType<CLuaVector2D>())
+        argStream.ReadVector2D(vecBottomRight);
+    else
+    {
+        argStream.ReadNumber(vecBottomRight.fX, vecTopLeft.fX);
+        argStream.ReadNumber(vecBottomRight.fY, vecTopLeft.fY);
+    }
+    argStream.ReadColor(color, 0xFFFFFFFF);
+    if (argStream.NextIsUserDataOfType<CLuaVector2D>())
+    {
+        CVector2D vecScale;
+        argStream.ReadVector2D(vecScale);
+        fScaleX = vecScale.fX;
+        fScaleY = vecScale.fY;
+    }
+    else
+    {
+        argStream.ReadNumber(fScaleX, 1);
+        if (argStream.NextIsNumber())
+            argStream.ReadNumber(fScaleY);
+        else
+            fScaleY = fScaleX;
+    }
+    MixedReadDxFontString(argStream, fontType, FONT_DEFAULT, pDxFontElement);
+    argStream.ReadEnumString(alignX, DX_ALIGN_LEFT);
+    argStream.ReadEnumString(alignY, DX_ALIGN_TOP);
+    argStream.ReadBool(bClip, false);
+    argStream.ReadBool(bWordBreak, false);
+    argStream.ReadBool(bPostGUI, false);
+    argStream.ReadBool(bColorCoded, false);
+    argStream.ReadBool(bSubPixelPositioning, false);
+    argStream.ReadNumber(fRotation, 0);
+    argStream.ReadVector2D(vecRotationOrigin, CVector2D((vecTopLeft.fX + vecBottomRight.fX) * 0.5f, (vecTopLeft.fY + vecBottomRight.fY) * 0.5f));
+    argStream.ReadNumber(fLineHeight, 0);
+    argStream.ReadColor(outlineColor, 0xFF000000);
+    argStream.ReadNumber(iOutlineWidth, 1);
+
+    if (!argStream.HasErrors())
+    {
+        ID3DXFont* pD3DXFont = CStaticFunctionDefinitions::ResolveD3DXFont(fontType, pDxFontElement);
+
+        ulong ulFormat = alignX | alignY;
+        if (bWordBreak)
+            ulFormat |= DT_WORDBREAK;
+        if (!bClip)
+            ulFormat |= DT_NOCLIP;
+
+        if (iOutlineWidth < 1) iOutlineWidth = 1;
+        if (iOutlineWidth > 3) iOutlineWidth = 3;
+
+        float fw = static_cast<float>(iOutlineWidth);
+        static const int offsets[][2] = {{-1,-1},{1,-1},{-1,1},{1,1}};
+        for (int i = 0; i < 4; i++)
+        {
+            float ox = offsets[i][0] * fw;
+            float oy = offsets[i][1] * fw;
+            g_pCore->GetGraphics()->DrawStringQueued(vecTopLeft.fX + ox, vecTopLeft.fY + oy, vecBottomRight.fX + ox, vecBottomRight.fY + oy,
+                                        outlineColor, strText, fScaleX, fScaleY, ulFormat, pD3DXFont, bPostGUI, bColorCoded,
+                                        bSubPixelPositioning, fRotation, vecRotationOrigin.fX + ox, vecRotationOrigin.fY + oy, fLineHeight);
+        }
+
+        g_pCore->GetGraphics()->DrawStringQueued(vecTopLeft.fX, vecTopLeft.fY, vecBottomRight.fX, vecBottomRight.fY, color, strText, fScaleX, fScaleY, ulFormat,
+                                     pD3DXFont, bPostGUI, bColorCoded, bSubPixelPositioning, fRotation, vecRotationOrigin.fX, vecRotationOrigin.fY,
+                                     fLineHeight);
+
+        lua_pushboolean(luaVM, true);
+        return 1;
+    }
+    else
+        m_pScriptDebugging->LogCustom(luaVM, argStream.GetFullErrorMessage());
+
     lua_pushboolean(luaVM, false);
     return 1;
 }
@@ -1200,32 +1306,12 @@ int CLuaDrawingDefs::DxCreateShader(lua_State* luaVM)
             return 1;
         }
 
-        strRootPath = ExtractPath(strPath);
+        strRootPath = strPath.Left(strPath.length() - strMetaPath.length());
     }
-
-    // Build include resolve map from resource files for cache path resolution
-    std::map<SString, SString> includeMap;
-    if (pFileResource)
-    {
-        auto it = pFileResource->IterBeginResourceFiles();
-        auto itEnd = pFileResource->IterEndResourceFiles();
-        for (; it != itEnd; ++it)
-        {
-            SString strShort = (*it)->GetShortName();
-            strShort = strShort.Replace("\\", "/");
-            includeMap[strShort] = (*it)->GetName();
-            SString strFilenameOnly = ExtractFilename(strShort);
-            if (strFilenameOnly != strShort)
-                includeMap[strFilenameOnly] = (*it)->GetName();
-        }
-    }
-    g_pCore->GetGraphics()->GetRenderItemManager()->SetShaderIncludeResolveMap(includeMap);
 
     SString        strStatus;
     CClientShader* pShader = g_pClientGame->GetManager()->GetRenderElementManager()->CreateShader(strPath, strRootPath, bIsRawData, strStatus, fPriority,
                                                                                                   fMaxDistance, bLayered, false, iEntityTypeMaskResult, macros);
-
-    g_pCore->GetGraphics()->GetRenderItemManager()->SetShaderIncludeResolveMap(std::map<SString, SString>());
 
     if (pShader)
     {
@@ -1236,7 +1322,8 @@ int CLuaDrawingDefs::DxCreateShader(lua_State* luaVM)
     }
 
     // Replace any path in the error message with our own one
-    strStatus = strStatus.ReplaceI(strRootPath, "");
+    SString strRootPathWithoutResource = strRootPath.Left(strRootPath.TrimEnd("\\").length() - SStringX(pFileResource->GetName()).length());
+    strStatus = strStatus.ReplaceI(strRootPathWithoutResource, "");
     argStream.SetCustomError(bIsRawData ? "raw data" : strFile, strStatus);
     m_pScriptDebugging->LogCustom(luaVM, argStream.GetFullErrorMessage());
     lua_pushboolean(luaVM, false);

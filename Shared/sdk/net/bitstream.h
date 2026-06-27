@@ -628,6 +628,14 @@ enum class eBitStreamVersion : unsigned short
     // 2025-06-05
     Glitch_VehicleRapidStop,
 
+    // <nui src="..."/> in meta.xml — auto-creates an iframe on resource start
+    // 2026-04-24
+    NuiTag_AutoFrame,
+
+    // <nui hidden="true"/> — iframe registers but loads about:blank until shown
+    // 2026-04-25
+    NuiTag_AutoFrameHidden,
+
     // This allows us to automatically increment the BitStreamVersion when things are added to this enum.
     // Make sure you only add things above this comment.
     Next,

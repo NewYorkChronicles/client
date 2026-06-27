@@ -50,7 +50,7 @@ template <>
 CCore* CSingleton<CCore>::m_pSingleton = NULL;
 
 static auto                Win32LoadLibraryA = LoadLibraryA;
-static constexpr long long TIME_DISCORD_UPDATE_RICH_PRESENCE_RATE = 10000;
+static constexpr long long TIME_DISCORD_PUMP_RATE = 250;
 
 static HMODULE WINAPI SkipDirectPlay_LoadLibraryA(LPCSTR fileName)
 {
@@ -1367,16 +1367,12 @@ void CCore::DoPostFramePulse()
     m_pConnectManager->DoPulse();
 
     // Update Discord Rich Presence status
-    if (const long long ticks = GetTickCount64_(); ticks > m_timeDiscordAppLastUpdate + TIME_DISCORD_UPDATE_RICH_PRESENCE_RATE)
+    if (const long long ticks = GetTickCount64_(); ticks > m_timeDiscordAppLastUpdate + TIME_DISCORD_PUMP_RATE)
     {
         if (const auto discord = g_pCore->GetDiscord(); discord && discord->IsDiscordRPCEnabled())
         {
             discord->UpdatePresence();
             m_timeDiscordAppLastUpdate = ticks;
-#ifdef DISCORD_DISABLE_IO_THREAD
-            // Update manually if we're not using the IO thread
-            discord->UpdatePresenceConnection();
-#endif
         }
     }
 
@@ -2132,7 +2128,7 @@ void CCore::CalculateStreamingMemoryRange()
 
     int iSystemRamMB = static_cast<int>(GetWMITotalPhysicalMemory() / 1024LL / 1024LL);
     int iVideoMemoryMB = g_pDeviceState->AdapterState.InstalledMemoryKB / 1024;
-    float fMax = std::min(static_cast<float>(iSystemRamMB) / 8.0f, 768.0f);
+    float fMax = std::min(static_cast<float>(iSystemRamMB) / 8.0f, 1024.0f);
     fMax = std::max(fMax, 128.0f);
     fMax = std::min(fMax, iVideoMemoryMB * 2.f);
     float fMin = fMax - std::max(fMax * 0.25f, 32.f);

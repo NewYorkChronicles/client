@@ -50,6 +50,10 @@ void CGUI_Impl::DestroyElementRecursive(CGUIElement* pElement)
 #define CGUI_SA_GOTHIC_SIZE      47
 #define CGUI_MTA_SANS_FONT_SIZE  9
 
+#define CGUI_NYC_BODY_FONT       "cgui/Inter-Medium.ttf"     // New York Chronicles UI body font
+#define CGUI_NYC_BODY_FONT_SB    "cgui/Inter-SemiBold.ttf"   // New York Chronicles UI bold font
+#define CGUI_NYC_MONO_FONT       "cgui/GeistMono-Medium.ttf" // New York Chronicles mono (data) font
+
 CGUI_Impl::CGUI_Impl(IDirect3DDevice9* pDevice)
     : m_HasSchemeLoaded(false),
       m_fCurrentServerCursorAlpha(1.0f),
@@ -112,11 +116,21 @@ CGUI_Impl::CGUI_Impl(IDirect3DDevice9* pDevice)
         BrowseToSolution("create-fonts", EXIT_GAME_FIRST | ASK_GO_ONLINE, SString("Error loading fonts!\n\n%s", *strMessage));
     }
 
-    // Window fonts first
-    m_pDefaultFont = (CGUIFont_Impl*)CreateFntFromWinFont("default-normal", CGUI_MTA_DEFAULT_REG, CGUI_MTA_DEFAULT_FONT, 9, 0);
-    m_pSmallFont = (CGUIFont_Impl*)CreateFntFromWinFont("default-small", CGUI_MTA_DEFAULT_REG, CGUI_MTA_DEFAULT_FONT, 7, 0);
-    m_pBoldFont = (CGUIFont_Impl*)CreateFntFromWinFont("default-bold-small", CGUI_MTA_DEFAULT_REG_BOLD, CGUI_MTA_DEFAULT_FONT_BOLD, 8, 0);
-    m_pClearFont = (CGUIFont_Impl*)CreateFntFromWinFont("clear-normal", CGUI_MTA_CLEAR_REG, CGUI_MTA_CLEAR_FONT, 9);
+    // Window fonts first — New York Chronicles bundled fonts, with a Windows-font fallback
+    try
+    {
+        m_pDefaultFont = (CGUIFont_Impl*)CreateFnt("default-normal", CGUI_NYC_BODY_FONT, 9, 0, false);
+        m_pSmallFont = (CGUIFont_Impl*)CreateFnt("default-small", CGUI_NYC_BODY_FONT, 8, 0, false);
+        m_pBoldFont = (CGUIFont_Impl*)CreateFnt("default-bold-small", CGUI_NYC_BODY_FONT_SB, 8, 0, false);
+        m_pClearFont = (CGUIFont_Impl*)CreateFnt("clear-normal", CGUI_NYC_BODY_FONT, 9, 0, false);
+    }
+    catch (CEGUI::Exception&)
+    {
+        m_pDefaultFont = (CGUIFont_Impl*)CreateFntFromWinFont("default-normal", CGUI_MTA_DEFAULT_REG, CGUI_MTA_DEFAULT_FONT, 9, 0);
+        m_pSmallFont = (CGUIFont_Impl*)CreateFntFromWinFont("default-small", CGUI_MTA_DEFAULT_REG, CGUI_MTA_DEFAULT_FONT, 7, 0);
+        m_pBoldFont = (CGUIFont_Impl*)CreateFntFromWinFont("default-bold-small", CGUI_MTA_DEFAULT_REG_BOLD, CGUI_MTA_DEFAULT_FONT_BOLD, 8, 0);
+        m_pClearFont = (CGUIFont_Impl*)CreateFntFromWinFont("clear-normal", CGUI_MTA_CLEAR_REG, CGUI_MTA_CLEAR_FONT, 9);
+    }
 
     try
     {
@@ -562,6 +576,13 @@ void CGUI_Impl::SetCurrentServerCursorAlpha(float fAlpha)
 float CGUI_Impl::GetCurrentServerCursorAlpha()
 {
     return m_fCurrentServerCursorAlpha;
+}
+
+void CGUI_Impl::SetCursorImage(const char* imageset, const char* image)
+{
+    if (!imageset || !image) return;
+    try { CEGUI::MouseCursor::getSingleton().setImage(imageset, image); }
+    catch (...) {}
 }
 
 eCursorType CGUI_Impl::GetCursorType()

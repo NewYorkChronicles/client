@@ -1540,6 +1540,8 @@ public:
 	virtual void	onSized(WindowEventArgs& e);
 	virtual void	onMouseButtonDown(MouseEventArgs& e);
 	virtual	void	onMouseWheel(MouseEventArgs& e);
+	virtual void	onMouseMove(MouseEventArgs& e);
+	virtual void	onMouseLeaves(MouseEventArgs& e);
 
 
 	/*************************************************************************
@@ -1608,6 +1610,7 @@ public:
 
     uint    d_firstVisibleRow;
     uint    d_lastVisibleRow;
+    uint    d_hoverRow;     //!< Row index currently under the mouse pointer (0xFFFFFFFF = none).
 
 private:
 	/*************************************************************************

@@ -150,6 +150,7 @@ public:
     void        SetCurrentServerCursorAlpha(float fAlpha);
     float       GetCurrentServerCursorAlpha();
     eCursorType GetCursorType();
+    void        SetCursorImage(const char* imageset, const char* image);
 
     void                    AddChild(CGUIElement_Impl* pChild);
     CEGUI::FontManager*     GetFontManager();

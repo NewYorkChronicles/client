@@ -365,6 +365,13 @@ public:
     unsigned int EntryInfoNodePool_NoOfUsedSpaces() const noexcept override;
     unsigned int PtrNodeDoubleLinkPool_NoOfUsedSpaces() const noexcept override;
 
+    int   SetGPSWaypoint(float fX, float fY, float fZ, DWORD dwColor, float fLineWidth) override;
+    bool  ClearGPSWaypoint(int waypointId = 0) override;
+    bool  IsGPSWaypointActive() override;
+    float GetGPSDistance() override;
+    float GetGPSWaypointDistance(int waypointId) override;
+    int   GetGPSPathNodes(CVector* outNodes, int maxNodes) override;
+
     CVector      m_vecAkimboTarget;
     bool         m_bAkimboTargetUp;
     static char* ms_PlayerImgCachePtr;

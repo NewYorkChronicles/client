@@ -90,6 +90,7 @@ private:
     bool OnBrowseServersButtonClick(CGUIElement* pElement);
     bool OnHostGameButtonClick();
     bool OnDisconnectButtonClick();
+    bool OnConnectButtonClick();
     bool OnEditorButtonClick();
     bool OnSettingsButtonClick(CGUIElement* pElement);
     bool OnAboutButtonClick(CGUIElement* pElement);
@@ -115,6 +116,7 @@ private:
     std::set<sMenuItem*>   m_unhoveredItems;
     sMenuItem*             m_pDisconnect;
     sMenuItem*             m_pHoveredItem;
+    sMenuItem*             m_pConnectItem;
     bool                   m_bMouseOverMenu;
 
     // Submenu classes
@@ -191,6 +193,7 @@ private:
     enum eMenuItems
     {
         MENU_ITEM_DISCONNECT,
+        MENU_ITEM_CONNECT,
         MENU_ITEM_QUICK_CONNECT,
         MENU_ITEM_BROWSE_SERVERS,
         MENU_ITEM_HOST_GAME,

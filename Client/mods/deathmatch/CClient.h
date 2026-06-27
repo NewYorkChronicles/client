@@ -31,6 +31,7 @@ public:
 
     bool HandleException(CExceptionInformation* pExceptionInformation);
     void GetPlayerNames(std::vector<SString>& vPlayerNames);
+    void GetCommandSuggestions(const char* szPrefix, std::vector<std::pair<SString, SString>>& outResults);
 
     void OnWindowFocusChange(bool state) override;
 
@@ -39,6 +40,7 @@ private:
     {
         std::string nickname;
         std::string password;
+        std::string authHex;
     };
 
     static InitializeArguments ExtractInitializeArguments(const char* arguments);

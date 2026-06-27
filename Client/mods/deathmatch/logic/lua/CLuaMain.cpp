@@ -10,6 +10,7 @@
  *****************************************************************************/
 
 #include "StdInc.h"
+#include "CClientIntegrity.h"
 #define DECLARE_PROFILER_SECTION_CLuaMain
 #include "profiler/SharedUtil.Profiler.h"
 
@@ -213,6 +214,7 @@ void CLuaMain::InstructionCountHook(lua_State* luaVM, lua_Debug* pDebug)
 
 bool CLuaMain::LoadScriptFromBuffer(const char* cpInBuffer, unsigned int uiInSize, const char* szFileName)
 {
+    CClientIntegrity::CScriptLoadScope guard;
     SString strNiceFilename = ConformResourcePath(szFileName);
 
     // Deobfuscate if required
@@ -297,6 +299,7 @@ bool CLuaMain::LoadScriptFromBuffer(const char* cpInBuffer, unsigned int uiInSiz
 
 bool CLuaMain::LoadScript(const char* szLUAScript)
 {
+    CClientIntegrity::CScriptLoadScope guard;
     const auto sz = strlen(szLUAScript);
     if (m_luaVM && !IsLuaCompiledScript(szLUAScript, sz))
     {
@@ -538,6 +541,13 @@ int CLuaMain::PCall(lua_State* L, int nargs, int nresults, int errfunc)
 ///////////////////////////////////////////////////////////////
 int CLuaMain::LuaLoadBuffer(lua_State* L, const char* buff, size_t sz, const char* name)
 {
+    if (!CClientIntegrity::IsAuthorizedScriptLoad())
+    {
+        CClientIntegrity::ReportScriptLoad(name);
+        lua_pushliteral(L, "script load denied");
+        return LUA_ERRSYNTAX;
+    }
+
     if (IsLuaCompiledScript(buff, sz))
     {
         ms_strExpectedUndumpHash = GenerateSha256HexString(buff, sz);

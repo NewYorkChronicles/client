@@ -3,13 +3,11 @@
  *  PROJECT:     Multi Theft Auto
  *  FILE:        multiplayer_sa/CMultiplayerSA_Streaming.cpp
  *
- *  RINWARES IMG: TEA-encrypted directory + per-file XOR data.
- *  All decryption in memory only — files on disk stay encrypted.
- *
  *****************************************************************************/
 
 #include "StdInc.h"
 #include <game/CStreaming.h>
+#include <NEncryption.h>
 
 void OnModelLoaded(unsigned int uiModelID)
 {
@@ -22,54 +20,6 @@ void OnModelLoaded(unsigned int uiModelID)
             pModelInfo->MakeCustomModel();
     }
 }
-
-#include "EncryptionKeys.h"
-
-static void TEADecrypt(const uint8_t* in, uint8_t* out, uint32_t size, const uint8_t* key)
-{
-    uint32_t k[4];
-    memcpy(k, key, 16);
-    for (uint32_t i = 0; i + 8 <= size; i += 8)
-    {
-        uint32_t v0, v1;
-        memcpy(&v0, in + i, 4);
-        memcpy(&v1, in + i + 4, 4);
-        uint32_t sum = 0xC6EF3720;
-        for (int r = 0; r < 32; r++)
-        {
-            v1 -= ((v0 << 4) + k[2]) ^ (v0 + sum) ^ ((v0 >> 5) + k[3]);
-            v0 -= ((v1 << 4) + k[0]) ^ (v1 + sum) ^ ((v1 >> 5) + k[1]);
-            sum -= 0x9E3779B9;
-        }
-        memcpy(out + i, &v0, 4);
-        memcpy(out + i + 4, &v1, 4);
-    }
-}
-
-static __forceinline void XORDecrypt(uint8_t* data, uint32_t size, const uint8_t* key16)
-{
-    uint32_t k[4];
-    memcpy(k, key16, 16);
-    uint32_t* p = reinterpret_cast<uint32_t*>(data);
-    uint32_t full = size >> 4;
-    for (uint32_t i = 0; i < full; i++, p += 4)
-    {
-        p[0] ^= k[0]; p[1] ^= k[1]; p[2] ^= k[2]; p[3] ^= k[3];
-    }
-    for (uint32_t i = full << 4; i < size; i++)
-        data[i] ^= key16[i & 15];
-}
-
-//////////////////////////////////////////////////////////////////////////////////////////
-// Directory decryption — in memory only, no disk writes.
-//
-// Hooks 3 CFileMgr::Read call sites inside LoadCdDirectory:
-//   0x5B61AB — reads 4-byte magic  (we detect RINWARES here)
-//   0x5B61B8 — reads 4-byte count  (we return decrypted count)
-//   0x5B61E1 — reads 32-byte entry (we return decrypted entries)
-//
-// All hooks are plain cdecl functions replacing cdecl calls. No asm.
-//////////////////////////////////////////////////////////////////////////////////////////
 
 typedef int (__cdecl *CFileMgr_Read_t)(int, char*, int);
 static CFileMgr_Read_t OrigRead = (CFileMgr_Read_t)0x538950;
@@ -94,8 +44,10 @@ static int __cdecl Hook_ReadMagic(int h, char* buf, int sz)
 
     uint8_t encHdr[16];
     OrigRead(h, (char*)encHdr, 16);
+    uint8_t vk[16]; NEncryption::DeriveValidationKey(vk);
     uint8_t decHdr[16];
-    TEADecrypt(encHdr, decHdr, 16, VALIDATION_KEY);
+    NEncryption::TEADecrypt(encHdr, decHdr, 16, vk);
+    memset(vk, 0, 16);
 
     uint32_t check;
     memcpy(&check, decHdr, 4);
@@ -109,7 +61,9 @@ static int __cdecl Hook_ReadMagic(int h, char* buf, int sz)
 
     delete[] s_dir;
     s_dir = new uint8_t[dirPad];
-    TEADecrypt(enc, s_dir, dirPad, DATA_KEY);
+    uint8_t dk[16]; NEncryption::DeriveDataKey(dk);
+    NEncryption::TEADecrypt(enc, s_dir, dirPad, dk);
+    memset(dk, 0, 16);
     delete[] enc;
 
     s_pos = 0;
@@ -144,9 +98,6 @@ static int __cdecl Hook_ReadEntry(int h, char* buf, int sz)
     return OrigRead(h, buf, sz);
 }
 
-//////////////////////////////////////////////////////////////////////////////////////////
-// Per-file data decryption in ConvertBufferToObject
-//////////////////////////////////////////////////////////////////////////////////////////
 static void DecryptStreamingBuffer(char* pBuffer, int)
 {
     uint8_t* buf = reinterpret_cast<uint8_t*>(pBuffer);
@@ -158,8 +109,10 @@ static void DecryptStreamingBuffer(char* pBuffer, int)
     uint32_t encDataSize;
     memcpy(&encDataSize, buf + 8, 4);
 
+    uint8_t hk[16]; NEncryption::DeriveHeaderKey(hk);
     uint8_t fileHeader[32];
-    TEADecrypt(buf + 12, fileHeader, 32, HEADER_KEY);
+    NEncryption::TEADecrypt(buf + 12, fileHeader, 32, hk);
+    memset(hk, 0, 16);
 
     uint32_t flags;
     memcpy(&flags, fileHeader + 4, 4);
@@ -168,9 +121,9 @@ static void DecryptStreamingBuffer(char* pBuffer, int)
 
     uint8_t* encData = buf + 44;
     if (flags & 8)
-        XORDecrypt(encData, encDataSize, dataKey);
+        NEncryption::XORDecrypt(encData, encDataSize, dataKey);
     else if (flags & 1)
-        TEADecrypt(encData, encData, encDataSize, dataKey);
+        NEncryption::TEADecrypt(encData, encData, encDataSize, dataKey);
 
     memmove(buf, encData, encDataSize);
 }
@@ -217,9 +170,6 @@ static void _declspec(naked) HOOK_CStreaming__ConvertBufferToObject()
     }
 }
 
-//////////////////////////////////////////////////////////////////////////////////////////
-// Patch a call site: replace target of existing E8 call instruction
-//////////////////////////////////////////////////////////////////////////////////////////
 static void PatchCall(DWORD addr, DWORD target)
 {
     DWORD oldProt;

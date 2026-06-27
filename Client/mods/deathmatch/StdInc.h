@@ -118,6 +118,7 @@
 #include <luadefs/CLuaBitDefs.h>
 #include <luadefs/CLuaBlipDefs.h>
 #include <luadefs/CLuaBrowserDefs.h>
+#include <luadefs/CLuaNuiDefs.h>
 #include <luadefs/CLuaClassDefs.h>
 #include <luadefs/CLuaCameraDefs.h>
 #include <luadefs/CLuaColShapeDefs.h>
@@ -136,6 +137,7 @@
 #include <luadefs/CLuaPickupDefs.h>
 #include <luadefs/CLuaPlayerDefs.h>
 #include <luadefs/CLuaProjectileDefs.h>
+#include <luadefs/CLuaGPSDefs.h>
 #include <luadefs/CLuaRadarAreaDefs.h>
 #include <luadefs/CLuaResourceDefs.h>
 #include <luadefs/CLuaSearchLightDefs.h>

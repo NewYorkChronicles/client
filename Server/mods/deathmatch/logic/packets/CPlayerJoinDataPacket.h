@@ -44,6 +44,8 @@ public:
 
     bool IsOptionalUpdateInfoRequired() { return m_bOptionalUpdateInfoRequired; }
 
+    const uint8_t* GetAuthToken() const { return m_authToken; }
+
 private:
     unsigned short m_usNetVersion;
     unsigned short m_usMTAVersion;
@@ -54,4 +56,5 @@ private:
     MD5            m_Password;
     SString        m_strSerialUser;
     CMtaVersion    m_strPlayerVersion;
+    uint8_t        m_authToken[16]{};
 };

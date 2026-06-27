@@ -724,6 +724,11 @@ public:
     static void SetVehiclesSunGlareEnabled(bool bEnabled);
     static bool GetVehiclesSunGlareEnabled();
 
+    bool GetMaterialColors(std::vector<SMaterialInfo>& outMaterials) override;
+
+    float GetSteerAngle() override;
+    void  SetSteerAngle(float fAngle) override;
+
 private:
     static void SetAutomobileDummyPosition(CAutomobileSAInterface* automobile, VehicleDummies dummy, const CVector& position);
 

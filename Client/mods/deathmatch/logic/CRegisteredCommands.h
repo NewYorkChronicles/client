@@ -11,6 +11,7 @@
 #pragma once
 
 #include <list>
+#include <vector>
 #include <unordered_set>
 
 #define MAX_REGISTERED_COMMAND_LENGTH        64
@@ -24,13 +25,15 @@ class CRegisteredCommands
         SString         strKey;
         CLuaFunctionRef iLuaFunction;
         bool            bCaseSensitive;
+        SString         strSuggestion;
     };
 
 public:
     CRegisteredCommands();
     ~CRegisteredCommands();
 
-    bool AddCommand(class CLuaMain* pLuaMain, const char* szKey, const CLuaFunctionRef& iLuaFunction, bool bCaseSensitive);
+    bool AddCommand(class CLuaMain* pLuaMain, const char* szKey, const CLuaFunctionRef& iLuaFunction, bool bCaseSensitive, const char* szSuggestion = "");
+    void GetSuggestions(const char* szPrefix, std::vector<std::pair<SString, SString>>& outResults, int maxResults = 8);
     bool RemoveCommand(class CLuaMain* pLuaMain, const char* szKey);
     void ClearCommands();
     void CleanUpForVM(class CLuaMain* pLuaMain);

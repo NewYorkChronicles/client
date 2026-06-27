@@ -2546,3 +2546,61 @@ void CVehicleSA::ReinitAudio()
     if (IsPassenger(pLocalPlayer) || GetDriver() == pLocalPlayer)
         audioInterface->SoundJoin();
 }
+
+struct SMaterialCollectData
+{
+    std::vector<CVehicle::SMaterialInfo>* pOut;
+    unsigned int                          uiIndex;
+};
+
+static bool __cdecl CollectMaterialsCB(RpAtomic* pAtomic, void* pData)
+{
+    if (!pAtomic || !pAtomic->geometry)
+        return true;
+
+    auto* pCollect = reinterpret_cast<SMaterialCollectData*>(pData);
+    RpMaterials& materials = pAtomic->geometry->materials;
+    if (!materials.materials || materials.entries <= 0)
+        return true;
+
+    for (int i = 0; i < materials.entries; ++i)
+    {
+        RpMaterial* pMat = materials.materials[i];
+        if (!pMat)
+            continue;
+
+        CVehicle::SMaterialInfo info;
+        info.index = pCollect->uiIndex++;
+        info.r = pMat->color.r;
+        info.g = pMat->color.g;
+        info.b = pMat->color.b;
+        info.a = pMat->color.a;
+        info.textureName = (pMat->texture && pMat->texture->name[0]) ? pMat->texture->name : "";
+        pCollect->pOut->push_back(info);
+    }
+    return true;
+}
+
+bool CVehicleSA::GetMaterialColors(std::vector<SMaterialInfo>& outMaterials)
+{
+    outMaterials.clear();
+    RpClump* pClump = GetRpClump();
+    if (!pClump)
+        return false;
+
+    SMaterialCollectData data;
+    data.pOut = &outMaterials;
+    data.uiIndex = 0;
+    RpClumpForAllAtomics(pClump, CollectMaterialsCB, &data);
+    return true;
+}
+
+float CVehicleSA::GetSteerAngle()
+{
+    return GetVehicleInterface()->m_fSteerAngle;
+}
+
+void CVehicleSA::SetSteerAngle(float fAngle)
+{
+    GetVehicleInterface()->m_fSteerAngle = fAngle;
+}

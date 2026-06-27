@@ -11,6 +11,8 @@
 
 #include "StdInc.h"
 #include "CGame.h"
+#include <random>
+#include <NYCAuth.h>
 
 #ifdef WIN32
     #include <ws2tcpip.h>
@@ -1604,6 +1606,9 @@ void CGame::AddBuiltInEvents()
     m_Events.AddEvent("onResourceStateChange", "resource, oldState, newState", nullptr, false);
     m_Events.AddEvent("onResourceLoadStateChange", "resource, oldState, newState", NULL, false);
 
+    // NYC anticheat events
+    m_Events.AddEvent("onPlayerCheatDetected", "level, message", NULL, false);
+
     // Blip events
 
     // Marker events
@@ -1759,15 +1764,18 @@ void CGame::ProcessTrafficLights(long long llCurrentTime)
 
 void CGame::Packet_PlayerJoin(const NetServerPlayerID& Source)
 {
-    // Reply with the mod this server is running
     NetBitStreamInterface* pBitStream = g_pNetServer->AllocateNetServerBitStream(0);
     if (pBitStream)
     {
-        // Write the mod name to the bitstream
         pBitStream->Write(static_cast<unsigned short>(MTA_DM_BITSTREAM_VERSION));
         pBitStream->WriteString("deathmatch");
 
-        // Send and destroy the bitstream
+        std::array<uint8_t, 16> nonce;
+        std::random_device rd;
+        for (auto& b : nonce) b = static_cast<uint8_t>(rd());
+        pBitStream->Write(reinterpret_cast<const char*>(nonce.data()), 16);
+        m_pendingAuth[Source.GetBinaryAddress()] = nonce;
+
         g_pNetServer->SendPacket(PACKET_ID_MOD_NAME, Source, pBitStream, false, PACKET_PRIORITY_HIGH, PACKET_RELIABILITY_RELIABLE_ORDERED);
         g_pNetServer->DeallocateNetServerBitStream(pBitStream);
     }
@@ -1856,7 +1864,31 @@ void CGame::Packet_PlayerJoinData(CPlayerJoinDataPacket& Packet)
             return;
         }
 
-        // Check if another player is using the same serial
+        {
+            auto it = m_pendingAuth.find(p.GetBinaryAddress());
+            if (it != m_pendingAuth.end())
+            {
+                uint8_t ak[16];
+                NYCAuth::DeriveKey(ak);
+                uint8_t expected[16];
+                NYCAuth::TEAEncrypt(it->second.data(), expected, 16, ak);
+                memset(ak, 0, 16);
+                m_pendingAuth.erase(it);
+                if (memcmp(expected, Packet.GetAuthToken(), 16) != 0)
+                {
+                    CLogger::LogPrintf("CONNECT: %s failed to connect (Auth failed) (%s)\n", szNick, strIPAndSerial.c_str());
+                    DisconnectPlayer(this, *pPlayer, CPlayerDisconnectedPacket::CUSTOM, "You were kicked");
+                    return;
+                }
+            }
+            else
+            {
+                CLogger::LogPrintf("CONNECT: %s failed to connect (No auth nonce) (%s)\n", szNick, strIPAndSerial.c_str());
+                DisconnectPlayer(this, *pPlayer, CPlayerDisconnectedPacket::CUSTOM, "You were kicked");
+                return;
+            }
+        }
+
         if (m_pMainConfig->IsCheckDuplicateSerialsEnabled() && m_pPlayerManager->GetBySerial(strSerial))
         {
             // Tell the console
@@ -4193,6 +4225,16 @@ void CGame::Packet_PlayerDiagnostic(CPlayerDiagnosticPacket& Packet)
     CPlayer* pPlayer = Packet.GetSourcePlayer();
     if (pPlayer && pPlayer->IsJoined())
     {
+        if (Packet.m_uiLevel == 1900)
+        {
+            CLogger::LogPrintf("[ANTICHEAT] %s integrity violation: %s\n", pPlayer->GetNick(), Packet.m_strMessage.c_str());
+            CLuaArguments args;
+            args.PushNumber(Packet.m_uiLevel);
+            args.PushString(Packet.m_strMessage);
+            pPlayer->CallEvent("onPlayerCheatDetected", args, NULL);
+            CStaticFunctionDefinitions::KickPlayer(pPlayer, NULL, SString("Anticheat: %s", Packet.m_strMessage.c_str()));
+            return;
+        }
         if (Packet.m_uiLevel == 236)
         {
             // Handle special info

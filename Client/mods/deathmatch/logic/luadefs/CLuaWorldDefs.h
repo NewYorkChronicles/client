@@ -23,6 +23,7 @@ public:
                                                                                                                                          CVector        end);
     LUA_DECLARE(ProcessLineOfSight);
     LUA_DECLARE(IsLineOfSightClear);
+    LUA_DECLARE(IsLineOfSightClearBatch);
     LUA_DECLARE(GetWorldFromScreenPosition);
     LUA_DECLARE(GetScreenFromWorldPosition);
     LUA_DECLARE(GetWeather);

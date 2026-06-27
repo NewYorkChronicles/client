@@ -10,6 +10,7 @@
  *****************************************************************************/
 
 #include "StdInc.h"
+#include "CClientIntegrity.h"
 #include "CChecksum.h"
 
 using std::list;
@@ -20,6 +21,7 @@ CResourceManager::CResourceManager()
 
 CResourceManager::~CResourceManager()
 {
+    CClientIntegrity::CResourceStopScope guard;
     CChecksum::ClearChecksumCache();
 
     while (!m_resources.empty())
@@ -118,6 +120,7 @@ void CResourceManager::OnDownloadGroupFinished()
 
 bool CResourceManager::RemoveResource(unsigned short usNetID)
 {
+    CClientIntegrity::CResourceStopScope guard;
     CResource* pResource = GetResourceFromNetID(usNetID);
     if (pResource)
     {
@@ -129,6 +132,11 @@ bool CResourceManager::RemoveResource(unsigned short usNetID)
 
 void CResourceManager::Remove(CResource* pResource)
 {
+    if (!CClientIntegrity::IsAuthorizedResourceStop())
+    {
+        CClientIntegrity::ReportResourceStop(pResource ? pResource->GetName() : "?");
+        return;
+    }
     // Triggger the onStop event, and set resource state to 'stopping'
     pResource->Stop();
 
@@ -146,6 +154,7 @@ bool CResourceManager::Exists(CResource* pResource)
 
 void CResourceManager::StopAll()
 {
+    CClientIntegrity::CResourceStopScope guard;
     while (m_resources.size() > 0)
     {
         Remove(m_resources.front());

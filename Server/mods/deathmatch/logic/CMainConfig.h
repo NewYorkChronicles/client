@@ -52,6 +52,7 @@ public:
     const std::string& GetServerName() { return m_strServerName; };
     SString            GetServerIP();
     SString            GetServerIPList();
+    SString            GetRelayServerIP();
     unsigned short     GetServerPort();
     unsigned int       GetMaxPlayers();
     unsigned int       GetHardMaxPlayers();
@@ -166,6 +167,7 @@ private:
 
     bool                       m_bVoiceEnabled;
     std::string                m_strServerIP;
+    std::string                m_strRelayServerIP;
     std::string                m_strServerName;
     unsigned short             m_usServerPort;
     unsigned int               m_uiHardMaxPlayers;

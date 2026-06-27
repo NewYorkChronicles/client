@@ -30,6 +30,7 @@
 #include <memory>
 #include <mmdeviceapi.h>
 #include <mutex>
+#include <climits>
 #include <cstdint>
 #define GetNextSibling(hwnd) GetWindow(hwnd, GW_HWNDNEXT)  // Re-define the conflicting macro
 #define GetFirstChild(hwnd)  GetTopWindow(hwnd)
@@ -87,9 +88,9 @@ public:
     bool GetProperty(const SString& strKey, SString& outProperty);
 
     void InjectMouseMove(int iPosX, int iPosY);
-    void InjectMouseDown(eWebBrowserMouseButton mouseButton, int count);
-    void InjectMouseUp(eWebBrowserMouseButton mouseButton);
-    void InjectMouseWheel(int iScrollVert, int iScrollHorz);
+    void InjectMouseDown(eWebBrowserMouseButton mouseButton, int count, int iPosX = INT_MIN, int iPosY = INT_MIN);
+    void InjectMouseUp(eWebBrowserMouseButton mouseButton, int iPosX = INT_MIN, int iPosY = INT_MIN);
+    void InjectMouseWheel(int iScrollVert, int iScrollHorz, int iPosX = INT_MIN, int iPosY = INT_MIN);
     void InjectKeyboardEvent(const CefKeyEvent& keyEvent);
 
     bool IsLocal() { return m_bIsLocal; };

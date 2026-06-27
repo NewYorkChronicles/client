@@ -147,6 +147,9 @@ void CLuaVehicleDefs::LoadFunctions()
         {"setVehicleDoorOpenRatio", SetVehicleDoorOpenRatio},
         {"setVehicleHandling", SetVehicleHandling},
         {"setVehicleSirens", SetVehicleSirens},
+        {"getVehicleMaterials", GetVehicleMaterials},
+        {"getVehicleSteerAngle", GetVehicleSteerAngle},
+        {"setVehicleSteerAngle", SetVehicleSteerAngle},
         {"setVehicleComponentPosition", SetVehicleComponentPosition},
         {"setVehicleComponentRotation", SetVehicleComponentRotation},
         {"setVehicleComponentScale", SetVehicleComponentScale},
@@ -4697,4 +4700,118 @@ std::unordered_map<std::string, float> CLuaVehicleDefs::GetVehicleAudioSettings(
     output["horn-volume-delta"] = pEntry.GetHornVolumeDelta();
 
     return output;
+}
+
+int CLuaVehicleDefs::GetVehicleMaterials(lua_State* luaVM)
+{
+    CClientVehicle* pVehicle = nullptr;
+    CScriptArgReader argStream(luaVM);
+    argStream.ReadUserData(pVehicle);
+
+    if (argStream.HasErrors())
+    {
+        m_pScriptDebugging->LogCustom(luaVM, argStream.GetFullErrorMessage());
+        lua_pushboolean(luaVM, false);
+        return 1;
+    }
+
+    CVehicle* pGameVehicle = pVehicle->GetGameVehicle();
+    if (!pGameVehicle)
+    {
+        lua_pushboolean(luaVM, false);
+        return 1;
+    }
+
+    std::vector<CVehicle::SMaterialInfo> materials;
+    if (!pGameVehicle->GetMaterialColors(materials))
+    {
+        lua_pushboolean(luaVM, false);
+        return 1;
+    }
+
+    lua_newtable(luaVM);
+    for (size_t i = 0; i < materials.size(); ++i)
+    {
+        lua_pushinteger(luaVM, i + 1);
+        lua_newtable(luaVM);
+
+        lua_pushstring(luaVM, "index");
+        lua_pushinteger(luaVM, materials[i].index);
+        lua_settable(luaVM, -3);
+
+        lua_pushstring(luaVM, "r");
+        lua_pushinteger(luaVM, materials[i].r);
+        lua_settable(luaVM, -3);
+
+        lua_pushstring(luaVM, "g");
+        lua_pushinteger(luaVM, materials[i].g);
+        lua_settable(luaVM, -3);
+
+        lua_pushstring(luaVM, "b");
+        lua_pushinteger(luaVM, materials[i].b);
+        lua_settable(luaVM, -3);
+
+        lua_pushstring(luaVM, "a");
+        lua_pushinteger(luaVM, materials[i].a);
+        lua_settable(luaVM, -3);
+
+        lua_pushstring(luaVM, "texture");
+        lua_pushstring(luaVM, materials[i].textureName.c_str());
+        lua_settable(luaVM, -3);
+
+        lua_settable(luaVM, -3);
+    }
+    return 1;
+}
+
+int CLuaVehicleDefs::GetVehicleSteerAngle(lua_State* luaVM)
+{
+    CClientVehicle* pVehicle = nullptr;
+    CScriptArgReader argStream(luaVM);
+    argStream.ReadUserData(pVehicle);
+
+    if (argStream.HasErrors())
+    {
+        m_pScriptDebugging->LogCustom(luaVM, argStream.GetFullErrorMessage());
+        lua_pushboolean(luaVM, false);
+        return 1;
+    }
+
+    CVehicle* pGameVehicle = pVehicle->GetGameVehicle();
+    if (!pGameVehicle)
+    {
+        lua_pushboolean(luaVM, false);
+        return 1;
+    }
+
+    lua_pushnumber(luaVM, pGameVehicle->GetSteerAngle());
+    return 1;
+}
+
+int CLuaVehicleDefs::SetVehicleSteerAngle(lua_State* luaVM)
+{
+    CClientVehicle* pVehicle = nullptr;
+    float fAngle;
+
+    CScriptArgReader argStream(luaVM);
+    argStream.ReadUserData(pVehicle);
+    argStream.ReadNumber(fAngle);
+
+    if (argStream.HasErrors())
+    {
+        m_pScriptDebugging->LogCustom(luaVM, argStream.GetFullErrorMessage());
+        lua_pushboolean(luaVM, false);
+        return 1;
+    }
+
+    CVehicle* pGameVehicle = pVehicle->GetGameVehicle();
+    if (!pGameVehicle)
+    {
+        lua_pushboolean(luaVM, false);
+        return 1;
+    }
+
+    pGameVehicle->SetSteerAngle(fAngle);
+    lua_pushboolean(luaVM, true);
+    return 1;
 }

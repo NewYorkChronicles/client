@@ -77,6 +77,17 @@ bool CResourceStartPacket::Write(NetBitStreamInterface& BitStream) const
             BitStream.Write(m_pResource->GetDownloadPriorityGroup());
         }
 
+        if (BitStream.Can(eBitStreamVersion::NuiTag_AutoFrame))
+        {
+            BitStream.WriteString(m_pResource->GetNuiPath());
+            BitStream.Write(m_pResource->GetNuiZ());
+        }
+
+        if (BitStream.Can(eBitStreamVersion::NuiTag_AutoFrameHidden))
+        {
+            BitStream.WriteBit(m_pResource->IsNuiHidden());
+        }
+
         // Send the resource files info
         std::list<CResourceFile*>::iterator iter = m_pResource->IterBegin();
         for (; iter != m_pResource->IterEnd(); iter++)

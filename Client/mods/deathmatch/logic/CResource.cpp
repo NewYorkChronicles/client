@@ -10,27 +10,11 @@
  *****************************************************************************/
 
 #include "StdInc.h"
+#include "CClientIntegrity.h"
 #define DECLARE_PROFILER_SECTION_CResource
 #include "profiler/SharedUtil.Profiler.h"
 #include "CServerIdManager.h"
-
-static SString GenerateObfuscatedPath(const char* szCacheRoot, const char* szResourceName, const char* szFileName)
-{
-    unsigned int hash = 0x811c9dc5;
-    const char*  parts[] = {szResourceName, "|", szFileName, "|", "NewYorkChronicles"};
-    for (int p = 0; p < 5; p++)
-        for (const char* c = parts[p]; *c; c++)
-        {
-            hash ^= (unsigned char)*c;
-            hash *= 0x01000193;
-        }
-
-    char hexName[17];
-    sprintf(hexName, "%08x%08x", hash, hash ^ 0xDEADBEEF);
-
-    SString strPath("%s\\cache\\%s.nyc", szCacheRoot, hexName);
-    return strPath;
-}
+#include <core/CNuiCoreInterface.h>
 
 #include <limits>
 
@@ -93,7 +77,7 @@ CResource::CResource(unsigned short usNetID, const char* szResourceName, CClient
     m_pResourceIMGRoot = new CClientDummy(g_pClientGame->GetManager(), INVALID_ELEMENT_ID, "imgroot");
     m_pResourceIMGRoot->MakeSystemEntity();
 
-    m_strResourceDirectoryPath = SString("%s/cache", g_pClientGame->GetFileCacheRoot());
+    m_strResourceDirectoryPath = SString("%s/resources/%s", g_pClientGame->GetFileCacheRoot(), *m_strResourceName);
     m_strResourcePrivateDirectoryPath = PathJoin(CServerIdManager::GetSingleton()->GetConnectionPrivateDirectory(), m_strResourceName);
 
     m_strResourcePrivateDirectoryPathOld = CServerIdManager::GetSingleton()->GetConnectionPrivateDirectory(true);
@@ -193,7 +177,8 @@ CResource::~CResource()
 CDownloadableResource* CResource::AddResourceFile(CDownloadableResource::eResourceType resourceType, const char* szFileName, uint uiDownloadSize,
                                                   CChecksum serverChecksum, bool bAutoDownload)
 {
-    SString strBuffer = GenerateObfuscatedPath(g_pClientGame->GetFileCacheRoot(), *m_strResourceName, szFileName);
+    // Create the resource file and add it to the list
+    SString strBuffer("%s\\resources\\%s\\%s", g_pClientGame->GetFileCacheRoot(), *m_strResourceName, szFileName);
 
     // Reject duplicates
     if (g_pClientGame->GetResourceManager()->IsResourceFile(strBuffer))
@@ -213,7 +198,8 @@ CDownloadableResource* CResource::AddResourceFile(CDownloadableResource::eResour
 
 CDownloadableResource* CResource::AddConfigFile(const char* szFileName, uint uiDownloadSize, CChecksum serverChecksum)
 {
-    SString strBuffer = GenerateObfuscatedPath(g_pClientGame->GetFileCacheRoot(), *m_strResourceName, szFileName);
+    // Create the config file and add it to the list
+    SString strBuffer("%s\\resources\\%s\\%s", g_pClientGame->GetFileCacheRoot(), *m_strResourceName, szFileName);
 
     // Reject duplicates
     if (g_pClientGame->GetResourceManager()->IsResourceFile(strBuffer))
@@ -324,7 +310,7 @@ void CResource::Load()
             // Check the contents
             if (CChecksum::GenerateChecksumFromBuffer(pBufferData, buffer.size()) == pResourceFile->GetServerChecksum())
             {
-                m_pLuaVM->LoadScriptFromBuffer(pBufferData, buffer.size(), SString("%s/%s", *m_strResourceName, pResourceFile->GetShortName()));
+                m_pLuaVM->LoadScriptFromBuffer(pBufferData, buffer.size(), pResourceFile->GetName());
             }
             else
             {
@@ -345,6 +331,15 @@ void CResource::Load()
     // Set active flag
     m_bActive = true;
     m_bStarting = false;
+
+    if (!m_strNuiPath.empty())
+    {
+        if (auto* pNui = g_pCore->GetWebCore() ? g_pCore->GetWebCore()->GetNuiCore() : nullptr)
+        {
+            SString url = SString("http://mta/%s/%s", m_strResourceName.c_str(), m_strNuiPath.c_str());
+            pNui->CreateFrame(m_strResourceName, url, m_iNuiZ, m_bNuiHidden);
+        }
+    }
 
     // Did we get a resource root entity?
     if (m_pResourceEntity)
@@ -374,11 +369,21 @@ void CResource::Load()
 
 void CResource::Stop()
 {
+    if (!CClientIntegrity::IsAuthorizedResourceStop())
+    {
+        CClientIntegrity::ReportResourceStop(m_strResourceName.c_str());
+        return;
+    }
     m_bStarting = false;
     m_bStopping = true;
     CLuaArguments Arguments;
     Arguments.PushResource(this);
     m_pResourceEntity->CallEvent("onClientResourceStop", Arguments, true);
+
+    // Tear down any NUI frames and RPC callbacks owned by this resource
+    if (auto* pWebCore = g_pCore->GetWebCoreUnchecked())
+        if (auto* pNui = pWebCore->GetNuiCore())
+            pNui->OnResourceStop(m_strResourceName);
 
     // When a custom application is used - reset discord stuff
     const auto discord = g_pCore->GetDiscord();
@@ -476,12 +481,6 @@ SString CResource::GetResourceDirectoryPath(eAccessType accessType, const SStrin
             }
         }
         return PathJoin(m_strResourcePrivateDirectoryPath, strMetaPath);
-    }
-    if (!strMetaPath.empty())
-    {
-        CResourceFile* pFile = GetResourceFile(strMetaPath);
-        if (pFile)
-            return pFile->GetName();
     }
     return PathJoin(m_strResourceDirectoryPath, strMetaPath);
 }

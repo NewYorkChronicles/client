@@ -3329,7 +3329,6 @@ bool CRenderWareSA::ModelInfoTXDAddTextures(SReplacementTextures* pReplacementTe
 
             if (uiTotalSize > 0)
             {
-                pGame->GetStreaming()->MakeSpaceFor(uiTotalSize);
                 pReplacementTextures->bHasRequestedSpace = true;
             }
         }

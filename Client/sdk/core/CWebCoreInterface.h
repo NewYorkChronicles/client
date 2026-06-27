@@ -13,6 +13,7 @@
 class CWebBrowserItem;
 class CWebViewInterface;
 class CWebView;
+class CNuiCoreInterface;
 
 enum class eURLState
 {
@@ -93,4 +94,6 @@ public:
                                         eWebFilterState state = eWebFilterState::WEBFILTER_ALL) = 0;
 
     virtual bool GetGPUEnabled() const noexcept = 0;
+
+    virtual CNuiCoreInterface* GetNuiCore() = 0;
 };

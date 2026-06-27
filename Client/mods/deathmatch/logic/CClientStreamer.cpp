@@ -386,6 +386,10 @@ bool CClientStreamer::IsActiveElement(CClientStreamElement* pElement)
 
 void CClientStreamer::Restream(bool bMovedFar)
 {
+    constexpr float         swapHysteresisDistanceSq = 10.0f * 10.0f;
+    constexpr std::uint32_t minStreamInDelayAfterOutMs = 1200u;
+    const std::uint32_t     currentTime = static_cast<std::uint32_t>(CClientTime::GetTime());
+
     // Limit distance stream in/out rate
     // Vehicles might have to ignore this to reduce blocking loads elsewhere.
     int iMaxOut = 6;
@@ -530,6 +534,9 @@ void CClientStreamer::Restream(bool bMovedFar)
                         continue;
                 }
 
+                if (!bMovedFar && (currentTime - pElement->GetLastStreamOutTime()) < minStreamInDelayAfterOutMs)
+                    continue;
+
                 // Not room to stream in more elements?
                 if (bReachedLimit)
                 {
@@ -577,7 +584,7 @@ void CClientStreamer::Restream(bool bMovedFar)
             // See if ClosestStreamedOut is nearer than FurthestStreamedIn
             CClientStreamElement* pFurthestStreamedIn = FurthestStreamedInList[iFurthestStreamedInIndex];
             CClientStreamElement* pClosestStreamedOut = ClosestStreamedOutList[uiClosestStreamedOutIndex];
-            if (pClosestStreamedOut->GetExpDistance() >= pFurthestStreamedIn->GetExpDistance())
+            if ((pClosestStreamedOut->GetExpDistance() + swapHysteresisDistanceSq) >= pFurthestStreamedIn->GetExpDistance())
                 break;
 
             // Stream out FurthestStreamedIn candidate if possible

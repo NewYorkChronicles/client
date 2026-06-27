@@ -30,7 +30,6 @@ public:
                                               ETextureType textureType = TTYPE_TEXTURE, uint uiVolumeDepth = 1);
     virtual CShaderItem*        CreateShader(const SString& strFile, const SString& strRootPath, bool bIsRawData, SString& strOutStatus, float fPriority,
                                              float fMaxDistance, bool bLayered, bool bDebug, int iTypeMask, const EffectMacroList& macros);
-    virtual void                SetShaderIncludeResolveMap(const std::map<SString, SString>& fileMap);
     virtual CRenderTargetItem*  CreateRenderTarget(uint uiSizeX, uint uiSizeY, bool bHasSurfaceFormat, bool bWithAlphaChannel, int surfaceFormat,
                                                    bool bForce = false);
     virtual CScreenSourceItem*  CreateScreenSource(uint uiSizeX, uint uiSizeY);

@@ -97,7 +97,6 @@ void CDiscordRichPresence::UpdatePresence()
     if (!m_bDiscordRPCEnabled)
         return;
 
-    // run callbacks
     Discord_RunCallbacks();
 
     if (!m_bConnected)
@@ -294,13 +293,6 @@ std::string CDiscordRichPresence::GetDiscordUserID() const
 
     return {};
 };
-
-#ifdef DISCORD_DISABLE_IO_THREAD
-void CDiscordRichPresence::UpdatePresenceConnection()
-{
-    Discord_UpdateConnection();
-}
-#endif
 
 void CDiscordRichPresence::HandleDiscordReady(const DiscordUser* pDiscordUser)
 {

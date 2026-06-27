@@ -112,14 +112,14 @@ void TabButton::drawSelf(float z)
 	{
 		drawDisabled(z);
 	}
-	else if (isHovering())
-	{
-		drawHover(z);
-	}
     else if (d_selected)
     {
         drawPushed(z);
     }
+	else if (isHovering())
+	{
+		drawHover(z);
+	}
     else
     {
         drawNormal(z);

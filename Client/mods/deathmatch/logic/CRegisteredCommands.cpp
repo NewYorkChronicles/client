@@ -22,12 +22,11 @@ CRegisteredCommands::~CRegisteredCommands()
     ClearCommands();
 }
 
-bool CRegisteredCommands::AddCommand(CLuaMain* pLuaMain, const char* szKey, const CLuaFunctionRef& iLuaFunction, bool bCaseSensitive)
+bool CRegisteredCommands::AddCommand(CLuaMain* pLuaMain, const char* szKey, const CLuaFunctionRef& iLuaFunction, bool bCaseSensitive, const char* szSuggestion)
 {
     assert(pLuaMain);
     assert(szKey);
 
-    // Check if we already have this key and handler
     SCommand* pCommand = GetCommand(szKey, pLuaMain);
     if (pCommand)
     {
@@ -35,16 +34,39 @@ bool CRegisteredCommands::AddCommand(CLuaMain* pLuaMain, const char* szKey, cons
             return false;
     }
 
-    // Create the entry
     pCommand = new SCommand;
     pCommand->pLuaMain = pLuaMain;
     pCommand->strKey.AssignLeft(szKey, MAX_REGISTERED_COMMAND_LENGTH);
     pCommand->iLuaFunction = iLuaFunction;
     pCommand->bCaseSensitive = bCaseSensitive;
+    pCommand->strSuggestion = szSuggestion ? szSuggestion : "";
 
-    // Add it to our list
     m_Commands.push_back(pCommand);
     return true;
+}
+
+void CRegisteredCommands::GetSuggestions(const char* szPrefix, std::vector<std::pair<SString, SString>>& outResults, int maxResults)
+{
+    outResults.clear();
+    if (!szPrefix || !szPrefix[0])
+        return;
+
+    SString strPrefix = szPrefix;
+    strPrefix = strPrefix.ToLower();
+    std::unordered_set<std::string> seen;
+
+    for (SCommand* pCmd : m_Commands)
+    {
+        SString strKey = pCmd->strKey;
+        SString strKeyLower = strKey.ToLower();
+        if (strKeyLower.BeginsWith(strPrefix) && strKeyLower != strPrefix && seen.find(std::string(strKeyLower)) == seen.end())
+        {
+            seen.insert(std::string(strKeyLower));
+            outResults.push_back({pCmd->strKey, pCmd->strSuggestion});
+            if ((int)outResults.size() >= maxResults)
+                break;
+        }
+    }
 }
 
 bool CRegisteredCommands::RemoveCommand(CLuaMain* pLuaMain, const char* szKey)

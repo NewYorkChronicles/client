@@ -9,18 +9,12 @@
  *****************************************************************************/
 
 #pragma once
-#define DISCORD_DISABLE_IO_THREAD
-// Uncomment to use manuall refresh of discord connection
-// (important) Don't forget to write same in discord-rpc.h
 
 class CDiscordInterface
 {
 public:
     virtual ~CDiscordInterface() = default;
     virtual void UpdatePresence() = 0;
-#ifdef DISCORD_DISABLE_IO_THREAD
-    virtual void UpdatePresenceConnection() = 0;
-#endif
     virtual void SetAssetLargeData(const char* szAsset, const char* szAssetText) = 0;
     virtual void SetAssetSmallData(const char* szAsset, const char* szAssetText) = 0;
     virtual void SetPresenceStartTimestamp(const unsigned long ulStart) = 0;

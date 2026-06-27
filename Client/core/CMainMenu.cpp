@@ -151,9 +151,12 @@ CMainMenu::CMainMenu(CGUI* pManager)
     float fBase = 0.613f;
     float fGap = 0.043f;
     m_pDisconnect = nullptr;
+    m_pConnectItem = nullptr;
 
-    m_menuItems.push_back(CreateItem(MENU_ITEM_SETTINGS, "menu_settings.png", CVector2D(0.168f, fBase + fGap * 0)));
-    m_menuItems.push_back(CreateItem(MENU_ITEM_QUIT, "menu_quit.png", CVector2D(0.168f, fBase + fGap * 1)));
+    m_pConnectItem = CreateItem(MENU_ITEM_CONNECT, "menu_connect.png", CVector2D(0.168f, fBase + fGap * 0));
+    m_menuItems.push_back(m_pConnectItem);
+    m_menuItems.push_back(CreateItem(MENU_ITEM_SETTINGS, "menu_settings.png", CVector2D(0.168f, fBase + fGap * 1)));
+    m_menuItems.push_back(CreateItem(MENU_ITEM_QUIT, "menu_quit.png", CVector2D(0.168f, fBase + fGap * 2)));
 
     float fFirstItemSize = m_menuItems.front()->image->GetSize(false).fY;
     m_iFirstItemCentre = (m_menuItems.front()->image)->GetPosition().fY + fFirstItemSize * 0.5f;
@@ -637,6 +640,17 @@ void CMainMenu::SetIsIngame(bool bIsIngame)
         m_bIsIngame = bIsIngame;
         m_Settings.SetIsModLoaded(bIsIngame);
         CCore::GetSingleton().RecalculateFrameRateLimit(-1, false);
+
+        if (m_pConnectItem && m_pConnectItem->image)
+        {
+            const char* szFile = bIsIngame ? "menu_disconnect.png" : "menu_connect.png";
+            if (!m_pConnectItem->image->LoadFromFile(PathJoin(g_pCore->GetLocalization()->GetLanguageDirectory(), szFile)))
+            {
+                auto pLang = g_pLocalization->GetLanguage("en_US");
+                m_pConnectItem->image->LoadFromFile(PathJoin(g_pCore->GetLocalization()->GetLanguageDirectory(pLang), szFile));
+            }
+            m_pConnectItem->menuType = bIsIngame ? MENU_ITEM_DISCONNECT : MENU_ITEM_CONNECT;
+        }
     }
 }
 
@@ -675,6 +689,8 @@ bool CMainMenu::OnMenuClick(CGUIMouseEventArgs Args)
         OnSettingsButtonClick(pElement);
     else if (m_pHoveredItem->menuType == MENU_ITEM_QUIT)
         OnQuitButtonClick(pElement);
+    else if (m_pHoveredItem->menuType == MENU_ITEM_CONNECT || m_pHoveredItem->menuType == MENU_ITEM_DISCONNECT)
+        OnConnectButtonClick();
 
     return true;
 }
@@ -736,12 +752,22 @@ void CMainMenu::HideServerInfo()
 
 bool CMainMenu::OnDisconnectButtonClick()
 {
-    // Return if we haven't faded in yet
     if (m_ucFade != FADE_VISIBLE)
         return false;
 
-    // Send "disconnect" command to the command handler
     CCommands::GetSingleton().Execute("disconnect", "");
+    return true;
+}
+
+bool CMainMenu::OnConnectButtonClick()
+{
+    if (m_ucFade != FADE_VISIBLE)
+        return false;
+
+    if (m_bIsIngame)
+        CCommands::GetSingleton().Execute("disconnect", "");
+    else
+        CCommands::GetSingleton().Execute("connect", "");
 
     return true;
 }
@@ -997,6 +1023,9 @@ void CMainMenu::WantsToDisconnectCallBack(void* pData, uint uiButton)
                 break;
             case MENU_ITEM_DISCONNECT:
                 OnDisconnectButtonClick();
+                break;
+            case MENU_ITEM_CONNECT:
+                OnConnectButtonClick();
                 break;
             default:
                 break;

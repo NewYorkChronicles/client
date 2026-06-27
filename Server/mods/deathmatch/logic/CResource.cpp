@@ -277,6 +277,17 @@ bool CResource::Load()
                 g_pGame->GetHTTPD()->UnregisterEHS(m_strResourceName.c_str());
                 return false;
             }
+
+            // <nui src="..." [z="0"] [hidden="true"] /> — single-instance primary NUI page.
+            // hidden=true creates the iframe in about:blank state; the real HTML
+            // only loads on the first showNuiFrame call.
+            if (CXMLNode* pNui = pRoot->FindSubNode("nui", 0))
+            {
+                auto& attrs = pNui->GetAttributes();
+                if (auto* pSrc    = attrs.Find("src"))    m_strNuiPath  = pSrc->GetValue();
+                if (auto* pZ      = attrs.Find("z"))      m_iNuiZ       = atoi(pZ->GetValue().c_str());
+                if (auto* pHidden = attrs.Find("hidden")) m_bNuiHidden  = (pHidden->GetValue() == "true");
+            }
         }
 
         // Delete the XML we created to save memory

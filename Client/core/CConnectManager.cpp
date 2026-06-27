@@ -11,6 +11,7 @@
 
 #include "StdInc.h"
 #include "net/Packets.h"
+#include <NYCAuth.h>
 using namespace std;
 
 static CConnectManager* g_pConnectManager = NULL;
@@ -358,13 +359,23 @@ bool CConnectManager::StaticProcessPacket(unsigned char ucPacketID, NetBitStream
             SString strModName;
             BitStream.ReadString(strModName);
 
-            // Process packet data
+            SString strAuthHex;
+            if (BitStream.GetNumberOfUnreadBits() >= 128)
+            {
+                uint8_t nonce[16], resp[16], ak[16];
+                BitStream.Read(reinterpret_cast<char*>(nonce), 16);
+                NYCAuth::DeriveKey(ak);
+                NYCAuth::TEAEncrypt(nonce, resp, 16, ak);
+                memset(ak, 0, 16);
+                for (int i = 0; i < 16; i++) strAuthHex += SString("%02x", resp[i]);
+            }
+
             CCore::GetSingleton().GetNetwork()->SetServerBitStreamVersion(usServerBitStreamVersion);
 
             if (strModName == "deathmatch")
             {
-                // Populate the arguments to pass it (-c host port nick)
-                SString strArguments("%s %s", g_pConnectManager->m_strNick.c_str(), g_pConnectManager->m_strPassword.c_str());
+                const char* szPw = g_pConnectManager->m_strPassword.empty() ? "\x01" : g_pConnectManager->m_strPassword.c_str();
+                SString strArguments("%s %s %s", g_pConnectManager->m_strNick.c_str(), szPw, strAuthHex.c_str());
 
                 CCore::GetSingleton().RemoveMessageBox();
                 CGraphics::GetSingleton().ClearStatusMessage();

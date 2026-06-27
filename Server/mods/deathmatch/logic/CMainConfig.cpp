@@ -161,6 +161,11 @@ bool CMainConfig::Load()
     if (m_strServerIP == "auto" || m_strServerIP == "any")
         m_strServerIP = "";
 
+    // Grab the relay IP that we should advertise to the master server instead
+    // of the auto-detected public IP (for setups behind a DDoS relay).
+    GetString(m_pRootNode, "relayserver", m_strRelayServerIP);
+    m_strRelayServerIP = SString(m_strRelayServerIP).Replace(" ", "");
+
     // Grab the port
     int iTemp;
     iResult = GetInteger(m_pRootNode, "serverport", iTemp, 1, 65535);
@@ -1041,6 +1046,11 @@ SString CMainConfig::GetServerIPList()
     if (m_pCommandLineParser && m_pCommandLineParser->GetIP(strServerIP))
         return strServerIP;
     return m_strServerIP;
+}
+
+SString CMainConfig::GetRelayServerIP()
+{
+    return m_strRelayServerIP;
 }
 
 unsigned short CMainConfig::GetServerPort()

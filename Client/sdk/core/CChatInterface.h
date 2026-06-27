@@ -20,6 +20,12 @@ namespace Chat
             TEXT,
             INPUT_BG,
             INPUT_TEXT,
+            INPUT_BORDER,
+            SUGGEST_BG,
+            SUGGEST_TEXT,
+            SCROLLBAR_TRACK,
+            SCROLLBAR_THUMB,
+            CARET,
             MAX
         };
     }

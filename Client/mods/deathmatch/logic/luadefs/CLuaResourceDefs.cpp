@@ -10,6 +10,7 @@
  *****************************************************************************/
 
 #include "StdInc.h"
+#include "CClientIntegrity.h"
 #include <lua/CLuaFunctionParser.h>
 
 using std::list;
@@ -440,6 +441,7 @@ int CLuaResourceDefs::LoadString(lua_State* luaVM)
 
         if (!argStream.HasErrors())
         {
+            CClientIntegrity::CScriptLoadScope guard;
             CLuaShared::CheckUTF8BOMAndUpdate(&cpBuffer, &uiSize);
             if (!CLuaMain::LuaLoadBuffer(luaVM, cpBuffer, uiSize, szChunkname))
             {
@@ -520,6 +522,7 @@ int CLuaResourceDefs::Load(lua_State* luaVM)
 
         if (!argStream.HasErrors())
         {
+            CClientIntegrity::CScriptLoadScope guard;
             CLuaShared::CheckUTF8BOMAndUpdate(&cpBuffer, &uiSize);
             if (!CLuaMain::LuaLoadBuffer(luaVM, cpBuffer, uiSize, szChunkname))
             {

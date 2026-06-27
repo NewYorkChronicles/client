@@ -313,16 +313,6 @@ CShaderItem* CRenderItemManager::CreateShader(const SString& strFile, const SStr
     return pShaderItem;
 }
 
-void CRenderItemManager::SetShaderIncludeResolveMap(const std::map<SString, SString>& fileMap)
-{
-    extern void SetShaderIncludeResolveMap(const std::map<SString, SString>& fileMap);
-    extern void ClearShaderIncludeResolveMap();
-    if (fileMap.empty())
-        ClearShaderIncludeResolveMap();
-    else
-        SetShaderIncludeResolveMap(fileMap);
-}
-
 ////////////////////////////////////////////////////////////////
 //
 // CRenderItemManager::CreateDxFont

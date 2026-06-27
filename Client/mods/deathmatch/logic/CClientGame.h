@@ -244,6 +244,9 @@ public:
     CClientGame(bool bLocalPlay = false);
     ~CClientGame();
 
+    void    SetAuthToken(const std::string& hex);
+    const uint8_t* GetAuthToken() const { return m_authToken; }
+
     bool StartGame(const char* szNick, const char* szPassword, eServerType Type = SERVER_TYPE_NORMAL);
     bool StartLocalGame(eServerType Type, const char* szPassword = NULL);
     void SetupLocalGame(eServerType Type);
@@ -735,6 +738,7 @@ private:
     CClientPlayer* m_pLocalPlayer;
     ElementID      m_LocalID;
     SString        m_strLocalNick;
+    uint8_t        m_authToken[16]{};
 
     CClientEntity*      m_pRootEntity;
     CLuaManager*        m_pLuaManager;

@@ -92,5 +92,7 @@
 	<Image Name="RadioButtonHover" XPos="107" YPos="19" Width="16" Height="16" />
 	<Image Name="RadioButtonNormal" XPos="107" YPos="37" Width="16" Height="16" />
 	<Image Name="RadioButtonMarkHover" XPos="107" YPos="73" Width="16" Height="16" />
+    <Image Name="MouseHand" XPos="0" YPos="129" Width="18" Height="22" />
+
 	
 </Imageset>

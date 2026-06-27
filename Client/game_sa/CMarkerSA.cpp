@@ -22,11 +22,11 @@ void CMarkerSA::Init()
     //  internalInterface->nColour = MARKER_COLOR_BLUE;
     //  internalInterface->bBright = TRUE;
     internalInterface->bTrackingBlip = true;
-    internalInterface->bShortRange = false;
+    internalInterface->bShortRange = true;
     internalInterface->bFriendly = false;
-    internalInterface->fBlipMarkerScale = 2.0f;
+    internalInterface->fBlipMarkerScale = 1.0f;
     internalInterface->PoolIndex = 0;
-    internalInterface->nBlipScale = 2;
+    internalInterface->nBlipScale = 1;
     internalInterface->bBlipFade = false;
     internalInterface->nBlipDisplayFlag = (BYTE)MarkerDisplay::MARKER_DISPLAY_BLIPONLY;
     internalInterface->nBlipSprite = (BYTE)RadarSprite::RADAR_SPRITE_NONE;

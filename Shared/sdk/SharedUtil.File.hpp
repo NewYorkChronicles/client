@@ -24,13 +24,7 @@
 #include <cctype>
 #include <cstring>
 
-#if !defined(__cpp_lib_filesystem) || __cpp_lib_filesystem < 201703L
-    #ifndef _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING
-        #define _SILENCE_EXPERIMENTAL_FILESYSTEM_DEPRECATION_WARNING 1
-    #endif
-    #include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#else
+#if __cplusplus >= 201703L
     #include <filesystem>
 namespace fs = std::filesystem;
 #endif

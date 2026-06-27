@@ -24,9 +24,6 @@ public:
     void RestartDiscord();
     void SetDefaultData();
     void UpdatePresence();
-#ifdef DISCORD_DISABLE_IO_THREAD
-    void UpdatePresenceConnection();
-#endif
 
     void SetPresenceStartTimestamp(const unsigned long ulStart);
     void SetPresenceEndTimestamp(const unsigned long ulEnd);

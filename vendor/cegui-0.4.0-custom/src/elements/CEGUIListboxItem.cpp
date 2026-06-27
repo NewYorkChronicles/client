@@ -36,7 +36,7 @@ namespace CEGUI
 /*************************************************************************
 	Constants
 *************************************************************************/
-const colour	ListboxItem::DefaultSelectionColour	= 0xFF607FFF;
+const colour	ListboxItem::DefaultSelectionColour	= 0xFFE81E13;
 
 /*************************************************************************
 	Base class constructor

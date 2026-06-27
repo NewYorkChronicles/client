@@ -196,6 +196,7 @@ void CLuaManager::LoadCFunctions()
         {"showCursor", CLuaFunctionDefs::ShowCursor},
         {"getCursorAlpha", CLuaFunctionDefs::GetCursorAlpha},
         {"setCursorAlpha", CLuaFunctionDefs::SetCursorAlpha},
+        {"setCursorState", CLuaFunctionDefs::SetCursorState},
 
         // Util functions
         {"getValidPedModels", CLuaFunctionDefs::GetValidPedModels},
@@ -251,6 +252,7 @@ void CLuaManager::LoadCFunctions()
     CLuaAudioDefs::LoadFunctions();
     CLuaBlipDefs::LoadFunctions();
     CLuaBrowserDefs::LoadFunctions();
+    CLuaNuiDefs::LoadFunctions();
     CLuaCameraDefs::LoadFunctions();
     CLuaColShapeDefs::LoadFunctions();
     CLuaCompatibilityDefs::LoadFunctions();
@@ -268,6 +270,7 @@ void CLuaManager::LoadCFunctions()
     CLuaPlayerDefs::LoadFunctions();
     CLuaProjectileDefs::LoadFunctions();
     CLuaPointLightDefs::LoadFunctions();
+    CLuaGPSDefs::LoadFunctions();
     CLuaRadarAreaDefs::LoadFunctions();
     CLuaResourceDefs::LoadFunctions();
     CLuaSearchLightDefs::LoadFunctions();

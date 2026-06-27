@@ -406,6 +406,10 @@ void CSettings::ResetGuiPointers()
     m_pChatLineFadeout = NULL;
     m_pFlashWindow = NULL;
     m_pTrayBalloon = NULL;
+    m_pChatTimestamps = NULL;
+    m_pChatSuggestions = NULL;
+    m_pChatScrollbar = NULL;
+    m_pChatScrollbarAlways = NULL;
 
     m_pLabelBrowserGeneral = NULL;
     m_pCheckBoxRemoteBrowser = NULL;
@@ -1410,6 +1414,7 @@ void CSettings::CreateGUI()
     /**
      *  PostFX tab
      **/
+    {
     CVector2D   postFxPos(12.0f, 12.0f);
     const float postFxRowHeight = 28.0f;
     const float postFxValueColumnPadding = 10.0f;
@@ -1510,6 +1515,7 @@ void CSettings::CreateGUI()
     m_pCheckBoxApplyFullscreen = reinterpret_cast<CGUICheckBox*>(pManager->CreateCheckBox(m_pTabPostFX, _("Apply adjustments in fullscreen mode")));
     m_pCheckBoxApplyFullscreen->SetPosition(CVector2D(postFxCheckboxColumnX, postFxPos.fY));
     m_pCheckBoxApplyFullscreen->AutoSize(nullptr, 20.0f);
+    }
 
     /**
      * Interface/chat Tab
@@ -2065,7 +2071,11 @@ void RestartCallBack(void* ptr, unsigned int uiButton)
 
     if (uiButton == 1)
     {
-        SetOnQuitCommand("restart");
+        if (HANDLE hEvent = OpenEventW(EVENT_MODIFY_STATE, FALSE, L"NYCLauncher_Relaunch"))
+        {
+            SetEvent(hEvent);
+            CloseHandle(hEvent);
+        }
         CCore::GetSingleton().Quit();
     }
 }
@@ -2913,16 +2923,20 @@ void CSettings::CreateInterfaceTabGUI()
     // Colors
     //
     {
-        SString strChatBG = _("Chat Background"), strChatText = _("Chat Text"), strInputBG = _("Input Background"), strInputText = _("Input Text");
-
         CGUITabPanel* pColorTabPanel = reinterpret_cast<CGUITabPanel*>(pManager->CreateTabPanel(pTabColors));
         pColorTabPanel->SetPosition(CVector2D(10.0f, 10.0f));
         pColorTabPanel->SetSize(CVector2D(vecSize.fX - 20.0f, vecSize.fY - 45.0f));
 
-        CreateChatColorTab(Chat::ColorType::BG, strChatBG, pColorTabPanel);
-        CreateChatColorTab(Chat::ColorType::TEXT, strChatText, pColorTabPanel);
-        CreateChatColorTab(Chat::ColorType::INPUT_BG, strInputBG, pColorTabPanel);
-        CreateChatColorTab(Chat::ColorType::INPUT_TEXT, strInputText, pColorTabPanel);
+        CreateChatColorTab(Chat::ColorType::BG, _("Chat BG"), pColorTabPanel);
+        CreateChatColorTab(Chat::ColorType::TEXT, _("Text"), pColorTabPanel);
+        CreateChatColorTab(Chat::ColorType::INPUT_BG, _("Input BG"), pColorTabPanel);
+        CreateChatColorTab(Chat::ColorType::INPUT_TEXT, _("Input Text"), pColorTabPanel);
+        CreateChatColorTab(Chat::ColorType::INPUT_BORDER, _("Input Border"), pColorTabPanel);
+        CreateChatColorTab(Chat::ColorType::SUGGEST_BG, _("Suggest BG"), pColorTabPanel);
+        CreateChatColorTab(Chat::ColorType::SUGGEST_TEXT, _("Suggest Text"), pColorTabPanel);
+        CreateChatColorTab(Chat::ColorType::SCROLLBAR_TRACK, _("Scroll Track"), pColorTabPanel);
+        CreateChatColorTab(Chat::ColorType::SCROLLBAR_THUMB, _("Scroll Thumb"), pColorTabPanel);
+        CreateChatColorTab(Chat::ColorType::CARET, _("Caret"), pColorTabPanel);
     }
 
     //
@@ -3164,7 +3178,7 @@ void CSettings::CreateInterfaceTabGUI()
             m_pChatCssBackground->GetPosition(vecTemp);
             m_pChatCssBackground->AutoSize(NULL, 20.0f);
 
-            m_pChatNickCompletion = reinterpret_cast<CGUICheckBox*>(pManager->CreateCheckBox(pTabOptions, _("Nickname completion using the \"Tab\" key")));
+            m_pChatNickCompletion = reinterpret_cast<CGUICheckBox*>(pManager->CreateCheckBox(pTabOptions, _("Nickname completion")));
             m_pChatNickCompletion->SetPosition(CVector2D(vecTemp.fX, vecTemp.fY + fLineSizeY + fLineGapY));
             m_pChatNickCompletion->GetPosition(vecTemp);
             m_pChatNickCompletion->AutoSize(NULL, 20.0f);
@@ -3183,6 +3197,38 @@ void CSettings::CreateInterfaceTabGUI()
             m_pChatTextBlackOutline->SetPosition(CVector2D(vecTemp.fX, vecTemp.fY + fLineSizeY + fLineGapY));
             m_pChatTextBlackOutline->GetPosition(vecTemp);
             m_pChatTextBlackOutline->AutoSize(NULL, 20.0f);
+        }
+
+        // NYC Chat
+        {
+            pTabOptions->GetSize(vecSize);
+            float fCol3X = vecSize.fX * 0.55f;
+
+            pLabel = reinterpret_cast<CGUILabel*>(pManager->CreateLabel(pTabOptions, _("NYC Chat")));
+            pLabel->SetPosition(CVector2D(fCol3X, 10.0f));
+            pLabel->GetPosition(vecTemp);
+            pLabel->AutoSize(NULL, 5.0f);
+            pLabel->SetFont("default-bold-small");
+
+            m_pChatTimestamps = reinterpret_cast<CGUICheckBox*>(pManager->CreateCheckBox(pTabOptions, _("Show timestamps")));
+            m_pChatTimestamps->SetPosition(CVector2D(fCol3X, vecTemp.fY + 30.0f));
+            m_pChatTimestamps->GetPosition(vecTemp);
+            m_pChatTimestamps->AutoSize(NULL, 20.0f);
+
+            m_pChatSuggestions = reinterpret_cast<CGUICheckBox*>(pManager->CreateCheckBox(pTabOptions, _("Command suggestions")));
+            m_pChatSuggestions->SetPosition(CVector2D(fCol3X, vecTemp.fY + fLineSizeY + fLineGapY));
+            m_pChatSuggestions->GetPosition(vecTemp);
+            m_pChatSuggestions->AutoSize(NULL, 20.0f);
+
+            m_pChatScrollbar = reinterpret_cast<CGUICheckBox*>(pManager->CreateCheckBox(pTabOptions, _("Show scrollbar")));
+            m_pChatScrollbar->SetPosition(CVector2D(fCol3X, vecTemp.fY + fLineSizeY + fLineGapY));
+            m_pChatScrollbar->GetPosition(vecTemp);
+            m_pChatScrollbar->AutoSize(NULL, 20.0f);
+
+            m_pChatScrollbarAlways = reinterpret_cast<CGUICheckBox*>(pManager->CreateCheckBox(pTabOptions, _("Always show scrollbar")));
+            m_pChatScrollbarAlways->SetPosition(CVector2D(fCol3X, vecTemp.fY + fLineSizeY + fLineGapY));
+            m_pChatScrollbarAlways->GetPosition(vecTemp);
+            m_pChatScrollbarAlways->AutoSize(NULL, 20.0f);
         }
     }
 }
@@ -4069,6 +4115,12 @@ void CSettings::LoadData()
     LoadChatColorFromCVar(Chat::ColorType::TEXT, "chat_text_color");
     LoadChatColorFromCVar(Chat::ColorType::INPUT_BG, "chat_input_color");
     LoadChatColorFromCVar(Chat::ColorType::INPUT_TEXT, "chat_input_text_color");
+    LoadChatColorFromCVar(Chat::ColorType::INPUT_BORDER, "chat_input_border_color");
+    LoadChatColorFromCVar(Chat::ColorType::SUGGEST_BG, "chat_suggestion_bg_color");
+    LoadChatColorFromCVar(Chat::ColorType::SUGGEST_TEXT, "chat_suggestion_text_color");
+    LoadChatColorFromCVar(Chat::ColorType::SCROLLBAR_TRACK, "chat_scrollbar_track_color");
+    LoadChatColorFromCVar(Chat::ColorType::SCROLLBAR_THUMB, "chat_scrollbar_thumb_color");
+    LoadChatColorFromCVar(Chat::ColorType::CARET, "chat_caret_color");
 
     unsigned int uiFont;
     CVARS_GET("chat_font", uiFont);
@@ -4101,6 +4153,14 @@ void CSettings::LoadData()
     m_pChatNickCompletion->SetSelected(bVar);
     CVARS_GET("chat_text_outline", bVar);
     m_pChatTextBlackOutline->SetSelected(bVar);
+    CVARS_GET("chat_timestamps", bVar);
+    m_pChatTimestamps->SetSelected(bVar);
+    CVARS_GET("chat_suggestions", bVar);
+    m_pChatSuggestions->SetSelected(bVar);
+    CVARS_GET("chat_scrollbar", bVar);
+    m_pChatScrollbar->SetSelected(bVar);
+    CVARS_GET("chat_scrollbar_always", bVar);
+    m_pChatScrollbarAlways->SetSelected(bVar);
 
     {
         int iVar;
@@ -4548,6 +4608,12 @@ void CSettings::SaveData()
     SaveChatColor(Chat::ColorType::TEXT, "chat_text_color");
     SaveChatColor(Chat::ColorType::INPUT_BG, "chat_input_color");
     SaveChatColor(Chat::ColorType::INPUT_TEXT, "chat_input_text_color");
+    SaveChatColor(Chat::ColorType::INPUT_BORDER, "chat_input_border_color");
+    SaveChatColor(Chat::ColorType::SUGGEST_BG, "chat_suggestion_bg_color");
+    SaveChatColor(Chat::ColorType::SUGGEST_TEXT, "chat_suggestion_text_color");
+    SaveChatColor(Chat::ColorType::SCROLLBAR_TRACK, "chat_scrollbar_track_color");
+    SaveChatColor(Chat::ColorType::SCROLLBAR_THUMB, "chat_scrollbar_thumb_color");
+    SaveChatColor(Chat::ColorType::CARET, "chat_caret_color");
     for (int iFont = 0; iFont < Chat::ColorType::MAX; iFont++)
     {
         if (m_pRadioChatFont[iFont]->GetSelected())
@@ -4565,6 +4631,10 @@ void CSettings::SaveData()
     CVARS_SET("chat_css_style_background", m_pChatCssBackground->GetSelected());
     CVARS_SET("chat_nickcompletion", m_pChatNickCompletion->GetSelected());
     CVARS_SET("chat_text_outline", m_pChatTextBlackOutline->GetSelected());
+    CVARS_SET("chat_timestamps", m_pChatTimestamps->GetSelected());
+    CVARS_SET("chat_suggestions", m_pChatSuggestions->GetSelected());
+    CVARS_SET("chat_scrollbar", m_pChatScrollbar->GetSelected());
+    CVARS_SET("chat_scrollbar_always", m_pChatScrollbarAlways->GetSelected());
     CVARS_SET("chat_line_life", GetMilliseconds(m_pChatLineLife));
     CVARS_SET("chat_line_fade_out", GetMilliseconds(m_pChatLineFadeout));
 

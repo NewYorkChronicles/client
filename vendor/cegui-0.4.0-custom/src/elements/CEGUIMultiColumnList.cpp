@@ -83,7 +83,8 @@ MultiColumnList::MultiColumnList(const String& type, const String& name) :
 	d_nominatedSelectRow(0),
 	d_lastSelected(NULL),
 	d_firstVisibleRow(-1),
-	d_lastVisibleRow(-1)
+	d_lastVisibleRow(-1),
+	d_hoverRow(0xFFFFFFFF)
 {
 	// add multi-column list box specific events
 	addMultiColumnListboxEvents();
@@ -1847,6 +1848,51 @@ void MultiColumnList::populateRenderCache()
         // calculate height for this row.
         itemSize.d_height = getHighestRowItemHeight(i);
 
+        // NYC: draw a hover highlight band under the row currently beneath the mouse
+        if (i == d_hoverRow)
+        {
+            ListboxItem* refItem = d_grid[i][0];
+            if (refItem && !refItem->isSelected())
+            {
+                const Image* hbrush = refItem->getSelectionBrushImage();
+                if (hbrush)
+                {
+                    Rect hoverRect(itemsArea.d_left, itemPos.d_y, itemsArea.d_right, itemPos.d_y + itemSize.d_height);
+                    Rect hoverClip(hoverRect.getIntersection(itemsArea));
+                    if (hoverClip.getWidth() > 0 && hoverClip.getHeight() > 0)
+                    {
+                        ColourRect hoverCols(0x40E81E13);
+                        hoverCols.modulateAlpha(alpha);
+                        d_renderCache.cacheImage(*hbrush, hoverRect, itemPos.d_z, hoverCols, &hoverClip);
+                    }
+                }
+            }
+        }
+
+        // NYC: draw a full-row selection band so the whole row highlights, not a single cell
+        {
+            ListboxItem* selRef = 0;
+            for (uint c = 0; c < getColumnCount(); ++c)
+            {
+                if (d_grid[i][c] && d_grid[i][c]->isSelected()) { selRef = d_grid[i][c]; break; }
+            }
+            if (selRef)
+            {
+                const Image* sbrush = selRef->getSelectionBrushImage();
+                if (sbrush)
+                {
+                    Rect selRect(itemsArea.d_left, itemPos.d_y, itemsArea.d_right, itemPos.d_y + itemSize.d_height);
+                    Rect selClip(selRect.getIntersection(itemsArea));
+                    if (selClip.getWidth() > 0 && selClip.getHeight() > 0)
+                    {
+                        ColourRect selCols(selRef->getSelectionColours());
+                        selCols.modulateAlpha(alpha);
+                        d_renderCache.cacheImage(*sbrush, selRect, itemPos.d_z, selCols, &selClip);
+                    }
+                }
+            }
+        }
+
         // loop through the columns in this row
         for (uint j = 0; j < getColumnCount(); ++j)
         {
@@ -2091,6 +2137,57 @@ void MultiColumnList::onMouseWheel(MouseEventArgs& e)
 	}
 
 	e.handled = true;
+}
+
+
+/*************************************************************************
+	Mouse movement: track which row is under the pointer for hover imagery
+*************************************************************************/
+void MultiColumnList::onMouseMove(MouseEventArgs& e)
+{
+	// base class processing.
+	Window::onMouseMove(e);
+
+	Point localPos(screenToWindow(e.position));
+
+	if (getMetricsMode() == Relative)
+	{
+		localPos = relativeToAbsolute(localPos);
+	}
+
+	uint newHover = 0xFFFFFFFF;
+
+	if (getListRenderArea().isPointInRect(localPos))
+	{
+		ListboxItem* item = getItemAtPoint(localPos);
+
+		if (item != NULL)
+		{
+			newHover = getItemRowIndex(item);
+		}
+	}
+
+	if (newHover != d_hoverRow)
+	{
+		d_hoverRow = newHover;
+		requestRedraw();
+	}
+}
+
+
+/*************************************************************************
+	Mouse left the widget: clear the hover row
+*************************************************************************/
+void MultiColumnList::onMouseLeaves(MouseEventArgs& e)
+{
+	// base class processing.
+	Window::onMouseLeaves(e);
+
+	if (d_hoverRow != 0xFFFFFFFF)
+	{
+		d_hoverRow = 0xFFFFFFFF;
+		requestRedraw();
+	}
 }
 
 
