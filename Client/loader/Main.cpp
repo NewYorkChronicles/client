@@ -25,6 +25,11 @@
 #include <algorithm>
 #include <cassert>
 #include <tlhelp32.h>
+#include <wintrust.h>
+#include <softpub.h>
+#include <wincrypt.h>
+#pragma comment(lib, "wintrust")
+#pragma comment(lib, "crypt32")
 
 #if __cplusplus >= 201703L
     #define MAYBE_UNUSED [[maybe_unused]]
@@ -71,68 +76,101 @@ namespace
         dest[len] = '\0';
     }
 
-    bool HasNycProtocol(const char* cmdLine)
-    {
-        if (!cmdLine) return false;
-        const char* p = strstr(cmdLine, "nyc://");
-        if (!p) return false;
-        p += 6;
-        return (strstr(p, "newyorkchronicles") != nullptr ||
-                strstr(p, "play.newyorkchronicles") != nullptr ||
-                strstr(p, "editor.newyorkchronicles") != nullptr);
-    }
-
     bool IsInstallerCommand(const char* cmdLine)
     {
         if (!cmdLine) return false;
         return (strstr(cmdLine, "/kdinstall") || strstr(cmdLine, "/kduninstall"));
     }
 
-    DWORD GetParentPid()
+    bool VerifyTrust(const wchar_t* path)
     {
-        DWORD pid = GetCurrentProcessId();
-        DWORD ppid = 0;
-        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if (snap == INVALID_HANDLE_VALUE) return 0;
-        PROCESSENTRY32 pe = {};
-        pe.dwSize = sizeof(pe);
-        if (Process32First(snap, &pe))
-        {
-            do {
-                if (pe.th32ProcessID == pid) { ppid = pe.th32ParentProcessID; break; }
-            } while (Process32Next(snap, &pe));
-        }
-        CloseHandle(snap);
-        return ppid;
+        WINTRUST_FILE_INFO fi = {};
+        fi.cbStruct = sizeof(fi);
+        fi.pcwszFilePath = path;
+        WINTRUST_DATA wd = {};
+        wd.cbStruct = sizeof(wd);
+        wd.dwUIChoice = WTD_UI_NONE;
+        wd.fdwRevocationChecks = WTD_REVOKE_NONE;
+        wd.dwUnionChoice = WTD_CHOICE_FILE;
+        wd.pFile = &fi;
+        wd.dwStateAction = WTD_STATEACTION_VERIFY;
+        GUID guid = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+        LONG status = WinVerifyTrust(nullptr, &guid, &wd);
+        wd.dwStateAction = WTD_STATEACTION_CLOSE;
+        WinVerifyTrust(nullptr, &guid, &wd);
+        return status == ERROR_SUCCESS;
     }
 
-    bool IsParentLauncher()
+    bool SignerIsNyc(const wchar_t* path)
     {
-        DWORD ppid = GetParentPid();
-        if (ppid == 0) return false;
-        HANDLE proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, ppid);
-        if (!proc) return false;
-        char path[MAX_PATH] = {};
-        DWORD sz = MAX_PATH;
-        bool result = false;
-        if (QueryFullProcessImageNameA(proc, 0, path, &sz))
+        DWORD      enc = 0, ctype = 0, ftype = 0;
+        HCERTSTORE store = nullptr;
+        HCRYPTMSG  msg = nullptr;
+        if (!CryptQueryObject(CERT_QUERY_OBJECT_FILE, path, CERT_QUERY_CONTENT_FLAG_PKCS7_SIGNED_EMBED, CERT_QUERY_FORMAT_FLAG_BINARY, 0, &enc, &ctype, &ftype,
+                              &store, &msg, nullptr))
+            return false;
+        bool  ok = false;
+        DWORD size = 0;
+        if (CryptMsgGetParam(msg, CMSG_SIGNER_INFO_PARAM, 0, nullptr, &size) && size)
         {
-            _strlwr_s(path, sz + 1);
-            result = (strstr(path, "launcher.exe") != nullptr);
+            if (auto* signer = static_cast<CMSG_SIGNER_INFO*>(LocalAlloc(LPTR, size)))
+            {
+                if (CryptMsgGetParam(msg, CMSG_SIGNER_INFO_PARAM, 0, signer, &size))
+                {
+                    CERT_INFO ci = {};
+                    ci.Issuer = signer->Issuer;
+                    ci.SerialNumber = signer->SerialNumber;
+                    if (PCCERT_CONTEXT cert = CertFindCertificateInStore(store, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SUBJECT_CERT, &ci, nullptr))
+                    {
+                        wchar_t cn[256] = {};
+                        if (CertGetNameStringW(cert, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0, nullptr, cn, 256) > 1)
+                            ok = (wcsstr(cn, L"Mohamed Rayane Merzoug") != nullptr);
+                        CertFreeCertificateContext(cert);
+                    }
+                }
+                LocalFree(signer);
+            }
         }
-        CloseHandle(proc);
-        return result;
+        if (msg) CryptMsgClose(msg);
+        if (store) CertCloseStore(store, 0);
+        return ok;
+    }
+
+    bool IsSignedLauncherRunning()
+    {
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == INVALID_HANDLE_VALUE) return false;
+        bool            found = false;
+        PROCESSENTRY32W pe = {};
+        pe.dwSize = sizeof(pe);
+        if (Process32FirstW(snap, &pe))
+        {
+            do {
+                if (_wcsicmp(pe.szExeFile, L"launcher.exe") != 0) continue;
+                if (HANDLE proc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pe.th32ProcessID))
+                {
+                    wchar_t path[MAX_PATH] = {};
+                    DWORD   len = MAX_PATH;
+                    if (QueryFullProcessImageNameW(proc, 0, path, &len) && VerifyTrust(path) && SignerIsNyc(path))
+                        found = true;
+                    CloseHandle(proc);
+                }
+            } while (!found && Process32NextW(snap, &pe));
+        }
+        CloseHandle(snap);
+        return found;
     }
 
     bool IsAuthorizedLaunch(const char* cmdLine)
     {
-        if (IsInstallerCommand(cmdLine))
+#if defined(MTA_DEBUG)
+        return true;
+#else
+        // Loader's own admin self-relaunch carries /nyc-admin and is always elevated; the launcher never starts the game elevated
+        if (cmdLine && strstr(cmdLine, "/nyc-admin") && IsUserAdmin())
             return true;
-        if (HasNycProtocol(cmdLine))
-            return true;
-        if (IsParentLauncher())
-            return true;
-        return false;
+        return IsInstallerCommand(cmdLine) || IsSignedLauncherRunning();
+#endif
     }
 
     CInstallManager* PerformEarlyInitialization(const char* safeCmdLine)
@@ -206,7 +244,6 @@ MTAEXPORT int DoWinMain(HINSTANCE hLauncherInstance, MAYBE_UNUSED HINSTANCE hPre
     BsodDetectionPreLaunch();
     MaybeShowCopySettingsDialog();
     HandleIfGTAIsAlreadyRunning();
-    CheckAntiVirusStatus();
     ShowSplash(hLauncherInstance);
     CheckDataFiles();
     CheckLibVersions();

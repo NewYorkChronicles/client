@@ -12,25 +12,26 @@
 
 int CLuaFunctionDefs::AddCommandHandler(lua_State* luaVM)
 {
-    //  bool addCommandHandler ( string commandName, function handlerFunction, [bool caseSensitive = true] )
+    //  bool addCommandHandler ( string commandName, function handlerFunction, [bool caseSensitive = true, string suggestion = ""] )
     SString         strKey;
     CLuaFunctionRef iLuaFunction;
     bool            bCaseSensitive;
+    SString         strSuggestion;
 
     CScriptArgReader argStream(luaVM);
     argStream.ReadString(strKey);
     argStream.ReadFunction(iLuaFunction);
     argStream.ReadBool(bCaseSensitive, true);
+    if (argStream.NextIsString())
+        argStream.ReadString(strSuggestion);
     argStream.ReadFunctionComplete();
 
     if (!argStream.HasErrors())
     {
-        // Grab our VM
         CLuaMain* pLuaMain = m_pLuaManager->GetVirtualMachine(luaVM);
         if (pLuaMain)
         {
-            // Add them to our list over command handlers
-            if (m_pRegisteredCommands->AddCommand(pLuaMain, strKey, iLuaFunction, bCaseSensitive))
+            if (m_pRegisteredCommands->AddCommand(pLuaMain, strKey, iLuaFunction, bCaseSensitive, strSuggestion))
             {
                 lua_pushboolean(luaVM, true);
                 return 1;

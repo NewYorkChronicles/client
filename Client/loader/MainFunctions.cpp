@@ -26,6 +26,7 @@
 #include <set>
 #include <locale.h>
 #include <DbgHelp.h>
+#include <tlhelp32.h>
 #pragma comment(lib, "dbghelp.lib")
 
 // Function must be at the start to fix odd compile error (Didn't happen locally but does in build server)
@@ -723,14 +724,7 @@ void HandleCustomStartMessage()
     SetApplicationSetting("diagnostics", "start-message-trouble", "");
 
     if (strStartMessage.BeginsWith("vdetect"))
-    {
-        SString strFilename = strStartMessage.SplitRight("name=");
-        strStartMessage =
-            _("WARNING\n\n"
-              "New York Chronicles has detected unusual activity.\n"
-              "Please run a virus scan to ensure your system is secure.\n\n");
-        strStartMessage += SString(_("The detected file was:  %s\n"), *strFilename);
-    }
+        return;
 
     DisplayErrorMessageBox(strStartMessage, _E("CL37"), strTrouble);
 }
@@ -1562,6 +1556,7 @@ void CheckDataFiles()
     }
 
     // Check for possible virus activity (simple file hash check)
+#if 0
     struct IntegrityCheck
     {
         const char* hash;
@@ -1601,6 +1596,7 @@ void CheckDataFiles()
             break;
         }
     }
+#endif
 
     // ASI file warning disabled — FLA and other ASI plugins are loaded intentionally.
 
@@ -1790,6 +1786,7 @@ int LaunchGame(SString strCmdLine)
     SString    sanitizedCmdLine = strCmdLine;
     const bool bDoneAdmin = sanitizedCmdLine.Contains("/done-admin");
     sanitizedCmdLine = sanitizedCmdLine.Replace(" /done-admin", "");
+    sanitizedCmdLine = sanitizedCmdLine.Replace(" /nyc-admin", "");
 
     // Validate command line length
     if (sanitizedCmdLine.length() > 2048)  // Max MTA connect URI length
@@ -2195,6 +2192,7 @@ void HandleOnQuitCommand()
     SetDllDirectory(strMTASAPath);
 
     SString strOnQuitCommand = GetRegistryValue("", "OnQuitCommand");
+    SetOnQuitCommand("");
 
     if (strOnQuitCommand.length() > 4096)
     {
@@ -2232,16 +2230,8 @@ void HandleOnQuitCommand()
     // Process operation type
     if (strOperation == "restart")
     {
-        strOperation = "open";
-        strFile = PathJoin(strMTASAPath, MTA_EXE_NAME);
-
-        if (!FileExists(strFile))
-        {
-            WriteDebugEvent("MTA executable not found for restart");
-            CheckService(CHECK_SERVICE_POST_GAME);
-            return;
-        }
-        CheckService(CHECK_SERVICE_RESTART_GAME);
+        CheckService(CHECK_SERVICE_POST_GAME);
+        return;
     }
     else if (strOperation == "open" || strOperation.empty())
     {

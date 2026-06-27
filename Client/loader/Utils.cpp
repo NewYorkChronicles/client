@@ -916,7 +916,7 @@ void RelaunchAsAdmin(const SString& strCmdLine, const SString& strReason)
     MessageBoxUTF8(NULL, SString(_("New York Chronicles needs Administrator access for the following task:\n\n  '%s'\n\nPlease confirm in the next window."), *strReason),
                    "New York Chronicles", MB_OK | MB_ICONINFORMATION | MB_TOPMOST);
     ReleaseSingleInstanceMutex();
-    ShellExecuteNonBlocking("runas", PathJoin(GetMTASAPath(), MTA_EXE_NAME), strCmdLine);
+    ShellExecuteNonBlocking("runas", PathJoin(GetMTASAPath(), MTA_EXE_NAME), strCmdLine + " /nyc-admin");
 }
 
 /////////////////////////////////////////////////////////////////////

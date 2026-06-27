@@ -435,7 +435,7 @@ SString CInstallManager::_ChangeToAdmin()
             "New York Chronicles", MB_OK | MB_ICONINFORMATION | MB_TOPMOST);
         SetIsBlockingUserProcess();
         ReleaseSingleInstanceMutex();
-        if (ShellExecuteBlocking("runas", GetLauncherPathFilename(), GetSequencerSnapshot()))
+        if (ShellExecuteBlocking("runas", GetLauncherPathFilename(), GetSequencerSnapshot() + " /nyc-admin"))
         {
             // Will return here once admin process has finished
             CreateSingleInstanceMutex();
@@ -535,16 +535,17 @@ SString CInstallManager::_ShowCrashFailDialog()
     }
 
     strMessage = strMessage.Replace("\r", "").Replace("\n", "\r\n");
-    SString strResult = ShowCrashedDialog(g_hInstance, strMessage);
-    HideCrashedDialog();
+    SString strResult = "ok";
+    //SString strResult = ShowCrashedDialog(g_hInstance, strMessage);
+    //HideCrashedDialog();
 
-    // Show OOM-specific information message box after crash dialog closes
-    if (exceptionCode == CUSTOM_EXCEPTION_CODE_OOM)
-    {
-        ShowOOMMessageBox(g_hInstance);
-    }
+    //// Show OOM-specific information message box after crash dialog closes
+    //if (exceptionCode == CUSTOM_EXCEPTION_CODE_OOM)
+    //{
+    //    ShowOOMMessageBox(g_hInstance);
+    //}
 
-    CheckAndShowFileOpenFailureMessage();
+    //CheckAndShowFileOpenFailureMessage();
 
     if (debuggerCapturePending)
     {
